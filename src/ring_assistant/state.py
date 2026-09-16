@@ -167,7 +167,10 @@ class StateStore:
 
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
-        self._db = sqlite3.connect(self.db_path)
+        # check_same_thread=False: the ASGI adapter runs the handler on a
+        # worker thread while the store was built on the main thread.
+        # Single-writer skeleton — no concurrent access is attempted.
+        self._db = sqlite3.connect(self.db_path, check_same_thread=False)
         self._db.executescript(_SCHEMA)
         self._db.commit()
 
