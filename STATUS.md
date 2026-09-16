@@ -1,6 +1,72 @@
 # STATUS — ring-delivery-assistant
 
-Build log. Last entry: 2026-09-16 (S3 — value layer live; 323 tests).
+Build log. Last entry: 2026-09-16 (S4 — submission readiness; 323 tests).
+
+## S4 — submission readiness (everything but the human's two gates)
+
+Goal: submission day (deadline 23-Oct-2026 12:00 PDT = 14:00 Lima) is
+pure execution. Everything the repo can produce for Devpost now exists;
+what remains is the human's portal registration (S1 Lane A, still
+open), the video recording, and the publication-approval gate. Suite
+unchanged and green: **323 tests, 0 failures (~4 s)**, `uv lock
+--check` clean, `uv sync --frozen` installs from the lock.
+
+### Deliverables landed
+
+- [x] **`docs/SUBMISSION.md`** — Devpost text, all sections (problem →
+      built-with) in English, paste-ready, plus binding honesty rules:
+      no live-traffic claims without credentials on screen, latency
+      quotes keep their offline/mock qualifiers, the demo is named a
+      simulator (rules-sanctioned, URL cited), no invented
+      people/metrics. Numbers used: 323 tests; N = 11, median 6.373 ms
+      ding → routed notification, classify median 2.627 ms (README's
+      published run).
+- [x] **`docs/VIDEO-SCRIPT.md`** — ~2:50 script (under the 3-min cap),
+      390 words at 150 wpm, storyboard with timecodes; latency-counter
+      moments mapped (M1 summary line, M2/M3 the artifact's total +
+      classify columns, M4 optional live-server timer IF registered);
+      side-by-side segments for native-alert-vs-routed-intent (the
+      08:03 timeline row) AND rules-vs-LLM classifiers (replay table vs
+      star-metric table, identical verdicts); clip list C1–C8 with
+      exact commands and expected on-screen output; honest-language
+      guardrails for editing.
+- [x] **`docs/ARCHITECTURE.md`** — canonical diagram (mermaid + compact
+      ASCII): live lane and replay/simulator lane converging on ONE
+      v1.1 edge (verify raw bytes → adapt envelope → normalize) →
+      classify → state → routing → Telegram, with the five
+      registration-day plug-in points marked as dashed PLUG nodes (webhook secret,
+      API token, LLM endpoint, Telegram creds, record dir), stage table
+      with failure behavior, and the star-metric stage boundaries.
+- [x] **`docs/SUBMISSION-CHECKLIST.md`** — every Devpost-day artifact
+      with an owner per item ([repo] done / [human] action /
+      [if-reg]); deadline converted to Lima time; pre-flight commands
+      including the audit re-run; mini-track decisions (Open Source =
+      enter once public; AWS Builder = only with honest scope, nothing
+      AWS is built); 45-min submission-day runbook; contingencies
+      (registration never completes → still submit, simulator is
+      sanctioned).
+- [x] **Deps pinned, verified**: core has zero runtime dependencies;
+      `uv.lock` is tracked and exact (fastapi 0.141.1, uvicorn 0.53.0,
+      httpx 0.28.1, pytest 9.1.1); `uv lock --check` passes; frozen
+      sync from the lock works; exact versions recorded in the
+      checklist §G.
+- [x] **Pre-publication audit, clean** (2026-09-16, re-run commands in
+      checklist §G): no AI attribution in history or tracked content
+      (only hits are the guard scripts' own detection patterns — the
+      policy, not attribution); no absolute/home/mount paths; no
+      secret-shaped strings (only labeled mocks like `mock-token`);
+      `.env` untracked; no personal emails; git author is the owner's
+      noreply GitHub identity.
+
+### What submission day still needs (all [human])
+
+1. Record the video per `docs/VIDEO-SCRIPT.md` (C7 and §H of the
+   checklist only if registration completed).
+2. Fill the Devpost form from `docs/SUBMISSION.md` +
+   `SUBMISSION-CHECKLIST.md` §A–F; submit the day before the deadline.
+3. Publication gate: explicit owner approval before the repo (and the
+   video's repo URL) goes public; pushing `main` is part of that item —
+   no push has happened.
 
 ## S3 — value layer live (mock legs until credentials, swap is config)
 
@@ -258,7 +324,16 @@ never blocks the buildable part.
 
 ## Next
 
-- [ ] S1 gate: human runs `docs/REGISTRATION-GUIDE.md` (≤ 19-Sep)
+- [ ] S4 human items (submission day is pure execution — see
+      `docs/SUBMISSION-CHECKLIST.md`): record the video per
+      `docs/VIDEO-SCRIPT.md`; fill the Devpost form from
+      `docs/SUBMISSION.md`; submit before 23-Oct 14:00 Lima
+- [ ] S4 publication gate: explicit owner approval before the repo or
+      the video's repo URL goes public (pushing `main` belongs to this
+      item — no push yet)
+- [ ] S1 gate: human runs `docs/REGISTRATION-GUIDE.md` (was ≤ 19-Sep;
+      still open — the submission stands on the rules-sanctioned
+      simulator path with or without it)
 - [ ] S2 residue: OAuth token exchange + account linking (needs S1
       client credentials; endpoint stubs become real; mints
       RING_API_TOKEN for the live snapshot source)
