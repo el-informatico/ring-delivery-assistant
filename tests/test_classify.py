@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from ring_assistant.classify import ClassificationContext, RuleBasedClassifier
+from ring_assistant.classify import (
+    ClassificationContext,
+    RuleBasedClassifier,
+    SceneEvidence,
+    platform_verdict,
+    verdict_from_evidence,
+)
 from ring_assistant.schema import EventKind, Intent, SubType, parse_event_payload
 
 
@@ -67,3 +73,41 @@ def test_context_recorded_but_verdict_stable():
 def test_structural_subtyping():
     """RuleBasedClassifier satisfies the protocol's shape."""
     assert callable(RuleBasedClassifier().classify)
+
+
+# -- shared helpers (pixel ladder + platform table lookups) --------------------
+
+
+@pytest.mark.parametrize(
+    ("evidence", "intent"),
+    [
+        # person+box -> picked up; box alone -> deposited; person alone ->
+        # person; body+wheels -> vehicle; thresholds from the calibration
+        (SceneEvidence(box=0.05, person=0.01, vehicle=0.0, wheel=0.0), Intent.PACKAGE_PICKED_UP),
+        (SceneEvidence(box=0.05, person=0.0, vehicle=0.0, wheel=0.0), Intent.PACKAGE_DEPOSITED),
+        (SceneEvidence(box=0.0, person=0.01, vehicle=0.0, wheel=0.0), Intent.PERSON_AT_DOOR),
+        (SceneEvidence(box=0.0, person=0.0, vehicle=0.12, wheel=0.03), Intent.VEHICLE_AT_DOOR),
+        # body without wheels (the night-ground trap) is NOT a vehicle
+        (SceneEvidence(box=0.0, person=0.0, vehicle=0.12, wheel=0.0), None),
+        (SceneEvidence(box=0.0, person=0.0, vehicle=0.0, wheel=0.0), None),
+    ],
+)
+def test_verdict_from_evidence_ladder(evidence, intent):
+    verdict = verdict_from_evidence(evidence)
+    if intent is None:
+        assert verdict is None
+    else:
+        assert verdict.intent is intent
+        assert verdict.because
+
+
+def test_platform_verdict_reads_valid_pairs():
+    rule = platform_verdict("motion_detected", "human")
+    assert rule.intent is Intent.PERSON_AT_DOOR
+    assert platform_verdict("motion_detected", None).intent is Intent.MOTION_NOISE
+
+
+def test_platform_verdict_tolerates_unknown_values():
+    # the mock's fallback must answer, never crash, on odd input
+    assert platform_verdict("ufo_detected", "human").intent is Intent.MOTION_NOISE
+    assert platform_verdict("ding", "sub_type_from_the_future").intent is Intent.PERSON_AT_DOOR

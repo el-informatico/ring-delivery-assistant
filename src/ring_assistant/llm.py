@@ -9,6 +9,12 @@ inject a fake transport.
 The adapter is optional at runtime: the core pipeline works with the
 rule stub, and this module raises ``ConfigurationError`` instead of
 guessing defaults when the environment is not configured.
+
+Offline, the full multimodal call path still runs:
+:func:`mock_vision_transport` answers requests as a vision model would
+(deterministic — same request in, same bytes out), and
+:func:`build_classifier` is the single composition point that picks
+rules / pixel rules / LLM-with-fallback for every CLI and the server.
 """
 
 from __future__ import annotations
@@ -22,9 +28,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 
-from .classify import ClassificationContext
+from .classify import (
+    ClassificationContext,
+    IntentClassifier,
+    RuleBasedClassifier,
+    SnapshotRuleClassifier,
+    analyze_snapshot,
+    platform_verdict,
+    verdict_from_evidence,
+)
 from .schema import Intent, IntentResult, RingEvent
-from .snapshots import SnapshotSource
+from .snapshots import ImageDecodeError, SnapshotSource, decode_png
 
 Transport = Callable[[str, bytes, Mapping[str, str], float], bytes]
 """``transport(url, body, headers, timeout) -> response_bytes``.
@@ -201,3 +215,144 @@ class LLMClassifier:
             source=f"llm:{self.model}",
             detail=f"kind={event.kind.value} sub_type={event.sub_type.value if event.sub_type else None}",
         )
+
+
+# -- deterministic offline stand-in --------------------------------------------
+#
+# The mock lets the WHOLE multimodal call path run without a socket:
+# request assembly (fields + base64 image data URI), the HTTP-shaped
+# call, and the response parse all execute for real; only the model is
+# fake. It reads the attached PNG with the same stdlib decoder and the
+# same pixel ladder as the rules classifier, so offline verdicts match
+# the rules path exactly and stay deterministic. Real Ring snapshots
+# (watermarked JPEG) and missing images degrade to the platform table —
+# the honest answer for a vision-less mock, and exactly what the prompt
+# tells a real model to do with an unhelpful picture.
+
+
+def mock_vision_transport(url: str, body: bytes, headers: Mapping[str, str], timeout: float) -> bytes:
+    """Answer an ``LLMClassifier`` request as a vision model would, offline."""
+    request = json.loads(body.decode("utf-8"))
+    fields: dict = {}
+    data_uri: str | None = None
+    for part in request["messages"][1]["content"]:
+        if part.get("type") == "text":
+            fields = json.loads(part["text"])
+        elif part.get("type") == "image_url":
+            data_uri = part["image_url"]["url"]
+
+    verdict = None
+    if data_uri and data_uri.startswith("data:image/"):
+        try:
+            decoded = decode_png(base64.b64decode(data_uri.split(",", 1)[1]))
+        except (ValueError, ImageDecodeError):
+            decoded = None  # JPEG (real Ring), corrupt, or truncated bytes
+        if decoded is not None:
+            verdict = verdict_from_evidence(analyze_snapshot(decoded))
+    if verdict is not None:
+        intent, confidence, rationale = (
+            verdict.intent.value,
+            verdict.confidence,
+            f"{verdict.because} [mock vision]",
+        )
+    else:
+        rule = platform_verdict(fields.get("kind", "motion"), fields.get("sub_type"))
+        intent, confidence, rationale = (
+            rule.intent.value,
+            rule.confidence,
+            f"{rule.rationale} [mock vision, no image evidence]",
+        )
+
+    reply = json.dumps(
+        {"intent": intent, "confidence": confidence, "rationale": rationale}
+    )
+    return json.dumps(
+        {
+            "id": "chatcmpl-mock",
+            "object": "chat.completion",
+            "model": request["model"],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": reply},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+    ).encode("utf-8")
+
+
+# -- composition: which classifier answers, and what happens when the LLM can't
+
+
+@dataclass
+class FallbackClassifier:
+    """LLM first; the rules path answers when the endpoint cannot.
+
+    This is the "rules-based fallback if API friction" clause made
+    structural: a transport failure, timeout, or unusable reply at
+    classification time degrades the ONE event to the rules verdict —
+    the event is never failed for want of a model. The degradation is
+    visible, not silent: ``source`` is prefixed ``fallback:`` so a
+    timeline never claims the LLM answered when it didn't.
+    """
+
+    primary: IntentClassifier
+    fallback: IntentClassifier
+    name: str = "llm+fallback"
+
+    def classify(self, event: RingEvent, context: ClassificationContext) -> IntentResult:
+        try:
+            return self.primary.classify(event, context)
+        except ClassificationError as exc:
+            result = self.fallback.classify(event, context)
+            return IntentResult(
+                intent=result.intent,
+                confidence=result.confidence,
+                rationale=result.rationale,
+                source=f"fallback:{result.source}",
+                detail=f"primary classifier unavailable ({exc}); {result.detail}",
+            )
+
+
+def build_classifier(
+    settings,
+    snapshot_source: SnapshotSource | None = None,
+    transport: Transport | None = None,
+) -> IntentClassifier:
+    """One composition point for every entry that classifies.
+
+    * ``RING_LLM_ENDPOINT`` + ``RING_LLM_MODEL`` configured -> the
+      multimodal :class:`LLMClassifier` wrapped in
+      :class:`FallbackClassifier` (endpoint trouble degrades to rules,
+      per event, visibly). ``transport`` lets offline runs substitute
+      :func:`mock_vision_transport`; the swap to a real endpoint is
+      configuration, not code.
+    * no LLM, but a snapshot source wired -> the pixel rules
+      (:class:`SnapshotRuleClassifier`).
+    * neither -> the plain deterministic stub
+      (:class:`RuleBasedClassifier`).
+
+    A partially configured LLM environment (say, a model but no
+    endpoint) stays offline — the same "incomplete contract refuses to
+    guess" behavior the served app has always had.
+    """
+    rules: IntentClassifier = (
+        SnapshotRuleClassifier(source=snapshot_source)
+        if snapshot_source is not None
+        else RuleBasedClassifier()
+    )
+    if settings.llm_endpoint and settings.llm_model:
+        try:
+            llm = LLMClassifier(
+                endpoint=settings.llm_endpoint,
+                model=settings.llm_model,
+                api_key=settings.llm_api_key,
+                timeout_s=settings.llm_timeout_s,
+                snapshot_source=snapshot_source,
+                transport=transport or _urllib_transport,
+            )
+        except ConfigurationError:
+            return rules
+        return FallbackClassifier(primary=llm, fallback=rules)
+    return rules

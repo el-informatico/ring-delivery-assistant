@@ -161,6 +161,64 @@ class SceneEvidence:
         )
 
 
+@dataclass(frozen=True)
+class PixelVerdict:
+    """One rung of the decision ladder, matched over scene evidence."""
+
+    intent: Intent
+    confidence: float
+    because: str
+
+
+def verdict_from_evidence(evidence: SceneEvidence) -> PixelVerdict | None:
+    """The pixel decision ladder, first match wins; ``None`` = empty scene.
+
+    Shared by ``SnapshotRuleClassifier`` and the deterministic mock
+    transport in ``llm.py`` — both reason over the same pixels, so a
+    fixture that moves one moves the other.
+    """
+    has_person = evidence.person >= _MIN_PERSON_FRACTION
+    has_box = evidence.box >= _MIN_BOX_FRACTION
+    has_vehicle = (
+        evidence.vehicle >= _MIN_VEHICLE_FRACTION
+        and evidence.wheel >= _MIN_WHEEL_FRACTION
+    )
+    if has_person and has_box:
+        return PixelVerdict(
+            Intent.PACKAGE_PICKED_UP, 0.75, "person carrying a package"
+        )
+    if has_box:
+        return PixelVerdict(
+            Intent.PACKAGE_DEPOSITED, 0.8, "package present, no person"
+        )
+    if has_person:
+        return PixelVerdict(Intent.PERSON_AT_DOOR, 0.85, "person at the door")
+    if has_vehicle:
+        return PixelVerdict(Intent.VEHICLE_AT_DOOR, 0.8, "vehicle body and wheels")
+    return None
+
+
+def platform_verdict(kind_value: str, sub_type_value: str | None) -> _Rule:
+    """The ``(kind, sub_type)`` table entry, tolerating unknown values.
+
+    The LLM mock's fallback for imageless/unrecognizable requests: it
+    holds the request's own field strings, which the adapter already
+    validated — but a mock that CRASHES on unexpected input would be
+    worse than one that answers "unclassified motion".
+    """
+    try:
+        kind = EventKind(kind_value)
+    except ValueError:
+        return _RULES[(EventKind.MOTION, None)]
+    sub_type: SubType | None = None
+    if sub_type_value is not None:
+        try:
+            sub_type = SubType(sub_type_value)
+        except ValueError:
+            sub_type = None
+    return _RULES.get((kind, sub_type), _RULES[(EventKind.MOTION, None)])
+
+
 def analyze_snapshot(image: DecodedImage) -> SceneEvidence:
     """Measure the fixture palette's share of the frame."""
     return SceneEvidence(
@@ -235,37 +293,8 @@ class SnapshotRuleClassifier:
             )
 
         evidence = analyze_snapshot(decoded)
-        has_person = evidence.person >= _MIN_PERSON_FRACTION
-        has_box = evidence.box >= _MIN_BOX_FRACTION
-        has_vehicle = (
-            evidence.vehicle >= _MIN_VEHICLE_FRACTION
-            and evidence.wheel >= _MIN_WHEEL_FRACTION
-        )
-        if has_person and has_box:
-            intent, confidence, because = (
-                Intent.PACKAGE_PICKED_UP,
-                0.75,
-                "snapshot: person carrying a package",
-            )
-        elif has_box:
-            intent, confidence, because = (
-                Intent.PACKAGE_DEPOSITED,
-                0.8,
-                "snapshot: package present, no person",
-            )
-        elif has_person:
-            intent, confidence, because = (
-                Intent.PERSON_AT_DOOR,
-                0.85,
-                "snapshot: person at the door",
-            )
-        elif has_vehicle:
-            intent, confidence, because = (
-                Intent.VEHICLE_AT_DOOR,
-                0.8,
-                "snapshot: vehicle body and wheels",
-            )
-        else:
+        verdict = verdict_from_evidence(evidence)
+        if verdict is None:
             result = self.fallback.classify(event, context)
             return IntentResult(
                 intent=result.intent,
@@ -275,9 +304,9 @@ class SnapshotRuleClassifier:
                 detail=f"snapshot empty ({evidence.describe()}); {result.detail}",
             )
         return IntentResult(
-            intent=intent,
-            confidence=confidence,
-            rationale=f"{because} [{evidence.describe()}]",
+            intent=verdict.intent,
+            confidence=verdict.confidence,
+            rationale=f"snapshot: {verdict.because} [{evidence.describe()}]",
             source=self.name,
             detail=f"{note}; context: {', '.join(context_bits)}",
         )

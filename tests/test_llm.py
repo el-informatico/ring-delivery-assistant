@@ -1,7 +1,9 @@
 """LLM adapter: request shape, parsing, degradation, failure modes.
 
 No network: a fake transport captures requests and returns canned
-OpenAI-style responses.
+OpenAI-style responses, and the deterministic mock vision transport
+exercises the full multimodal call path offline (data URI in, parsed
+verdict out).
 """
 
 from __future__ import annotations
@@ -11,14 +13,23 @@ import json
 
 import pytest
 
-from ring_assistant.classify import ClassificationContext
-from ring_assistant.imaging import render_scene
+from ring_assistant.classify import (
+    ClassificationContext,
+    RuleBasedClassifier,
+    SnapshotRuleClassifier,
+)
+from ring_assistant.imaging import render_scene, render_scene_bytes
 from ring_assistant.llm import (
     ClassificationError,
     ConfigurationError,
+    FallbackClassifier,
     LLMClassifier,
+    build_classifier,
+    mock_vision_transport,
 )
-from ring_assistant.schema import parse_event_payload
+from ring_assistant.schema import Intent, parse_event_payload
+from ring_assistant.settings import Settings
+from ring_assistant.snapshots import SnapshotImage
 
 
 def make_classifier(transport, **overrides) -> LLMClassifier:
@@ -200,3 +211,148 @@ def test_satisfies_protocol_via_duck_typing():
     transport = fake_transport('{"intent": "motion_noise", "confidence": 0.5}')
     classifier = make_classifier(transport)
     assert callable(classifier.classify)
+
+
+# -- deterministic mock vision transport ---------------------------------------
+
+
+class SceneSource:
+    """Answers every fetch with one fixed rendered scene."""
+
+    def __init__(self, scene: str):
+        self.scene = scene
+
+    def fetch(self, event):
+        return SnapshotImage(
+            data=render_scene_bytes(self.scene), content_type="image/png", source="test"
+        )
+
+
+class BytesSource:
+    def __init__(self, data: bytes, content_type: str):
+        self.data, self.content_type = data, content_type
+
+    def fetch(self, event):
+        return SnapshotImage(data=self.data, content_type=self.content_type, source="test")
+
+
+def mock_classifier(scene: str, **overrides) -> LLMClassifier:
+    return make_classifier(
+        mock_vision_transport, snapshot_source=SceneSource(scene), **overrides
+    )
+
+
+def test_mock_transport_classifies_the_attached_png():
+    classifier = mock_classifier("package-mat")
+    result = classifier.classify(motion_event(sub_type=None), ClassificationContext())
+    assert result.intent is Intent.PACKAGE_DEPOSITED
+    assert result.source == "llm:vision-1"
+    assert "package present, no person" in result.rationale
+    assert "[mock vision]" in result.rationale
+
+
+def test_mock_transport_matches_the_pixel_rules_verdict():
+    # same pixels -> same intent on both paths (the shared ladder)
+    for scene, expected in (
+        ("package-mat", Intent.PACKAGE_DEPOSITED),
+        ("person-with-box", Intent.PACKAGE_PICKED_UP),
+        ("person-door", Intent.PERSON_AT_DOOR),
+        ("van-drive", Intent.VEHICLE_AT_DOOR),
+    ):
+        via_mock = mock_classifier(scene).classify(
+            motion_event(sub_type=None), ClassificationContext()
+        )
+        via_rules = SnapshotRuleClassifier(source=SceneSource(scene)).classify(
+            motion_event(sub_type=None), ClassificationContext()
+        )
+        assert via_mock.intent is expected
+        assert via_mock.intent is via_rules.intent
+
+
+def test_mock_transport_degrades_jpeg_to_platform_fields():
+    # real Ring snapshots are JPEG: the stdlib decoder refuses them, and
+    # the mock (no vision of its own) answers from kind/sub_type
+    jpeg_source = BytesSource(b"\xff\xd8\xff\xe0 fake jpeg bytes", "image/jpeg")
+    classifier = make_classifier(
+        mock_vision_transport, snapshot_source=jpeg_source
+    )
+    result = classifier.classify(motion_event(sub_type="human"), ClassificationContext())
+    assert result.intent is Intent.PERSON_AT_DOOR
+    assert "no image evidence" in result.rationale
+
+
+def test_mock_transport_degrades_empty_scene_to_platform_fields():
+    classifier = mock_classifier("motion-empty")
+    result = classifier.classify(motion_event(sub_type=None), ClassificationContext())
+    assert result.intent is Intent.MOTION_NOISE  # unclassified motion on the wire
+
+
+def test_mock_transport_is_deterministic():
+    classifier = mock_classifier("package-mat")
+    first = classifier.classify(motion_event(sub_type=None), ClassificationContext())
+    second = mock_classifier("package-mat").classify(
+        motion_event(sub_type=None), ClassificationContext()
+    )
+    assert (first.intent, first.rationale) == (second.intent, second.rationale)
+
+
+# -- FallbackClassifier --------------------------------------------------------
+
+
+def test_fallback_degrades_to_rules_when_the_endpoint_cannot_answer():
+    def broken(url, body, headers, timeout):
+        raise OSError("connection refused")
+
+    classifier = FallbackClassifier(
+        primary=make_classifier(broken), fallback=RuleBasedClassifier()
+    )
+    result = classifier.classify(motion_event(), ClassificationContext())
+    assert result.intent is Intent.PERSON_AT_DOOR  # the rules verdict
+    assert result.source == "fallback:rules"
+    assert "primary classifier unavailable (LLM request/response failed" in result.detail
+    assert "connection refused" in result.detail
+
+
+def test_fallback_passes_healthy_llm_answers_through():
+    transport = fake_transport('{"intent": "person_at_door", "confidence": 0.9, "rationale": "figure at door"}')
+    classifier = FallbackClassifier(
+        primary=make_classifier(transport), fallback=RuleBasedClassifier()
+    )
+    result = classifier.classify(motion_event(), ClassificationContext())
+    assert result.source == "llm:vision-1"  # untouched, no fallback marker
+    assert result.confidence == 0.9
+
+
+# -- build_classifier composition ----------------------------------------------
+
+
+def test_build_classifier_defaults_to_the_rules_stub():
+    classifier = build_classifier(Settings())
+    assert isinstance(classifier, RuleBasedClassifier)
+
+
+def test_build_classifier_uses_pixel_rules_when_a_source_is_wired():
+    classifier = build_classifier(Settings(), snapshot_source=SceneSource("package-mat"))
+    assert isinstance(classifier, SnapshotRuleClassifier)
+
+
+def test_build_classifier_wraps_a_configured_llm_with_the_fallback():
+    settings = Settings.from_env(
+        {
+            "RING_LLM_ENDPOINT": "https://llm.example/v1",
+            "RING_LLM_MODEL": "vision-1",
+            "RING_LLM_API_KEY": "synthetic-key",
+        }
+    )
+    classifier = build_classifier(settings, transport=mock_vision_transport)
+    assert isinstance(classifier, FallbackClassifier)
+    assert isinstance(classifier.primary, LLMClassifier)
+    assert isinstance(classifier.fallback, RuleBasedClassifier)
+    # end to end through the composition: mock endpoint answers
+    result = classifier.classify(motion_event(sub_type=None), ClassificationContext())
+    assert result.intent is Intent.MOTION_NOISE  # no snapshot source wired
+
+
+def test_build_classifier_stays_offline_on_partial_llm_config():
+    settings = Settings.from_env({"RING_LLM_MODEL": "vision-1"})  # no endpoint
+    assert isinstance(build_classifier(settings), RuleBasedClassifier)

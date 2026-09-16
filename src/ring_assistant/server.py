@@ -30,9 +30,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .capture import CAPTURE_FILE_NAME, WebhookRecorder
-from .classify import RuleBasedClassifier
 from .ingest import WebhookError
-from .llm import ConfigurationError, LLMClassifier
+from .llm import build_classifier
 from .replay import Pipeline
 from .routing import Router
 from .schema import SchemaError
@@ -43,11 +42,13 @@ from .wire import UnsupportedEvent
 
 
 def build_pipeline(settings: Settings, db_path: str | None = None) -> Pipeline:
-    """LLM classifier when fully configured, rule stub otherwise."""
-    try:
-        classifier = LLMClassifier.from_env()
-    except ConfigurationError:
-        classifier = RuleBasedClassifier()
+    """LLM classifier when fully configured, rule stub otherwise.
+
+    Same composition point as every CLI (:func:`llm.build_classifier`):
+    a configured endpoint wins, and endpoint trouble degrades to rules
+    per event instead of failing the delivery.
+    """
+    classifier = build_classifier(settings)
     store = StateStore(db_path or settings.db_path)
     router = Router.from_settings(settings)
     return Pipeline(
