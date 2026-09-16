@@ -2,9 +2,11 @@
 
 No PIL / numpy: fixtures must be generatable in a bare Python 3.12
 environment (the core is dependency-free by design). Images are tiny
-96x64 RGB PNGs standing in for doorbell snapshots. The rules stub
-never reads pixels; the LLM adapter sends whatever bytes the snapshot
-path holds, so these fixtures exercise the real plumbing offline.
+96x64 RGB PNGs standing in for doorbell snapshots. The snapshot rules
+classifier (``classify.py``) reads them back through the stdlib PNG
+decoder in ``snapshots.py``; the LLM adapter sends whatever bytes the
+snapshot source holds, so these fixtures exercise the real plumbing
+offline.
 
 Scenes are deterministic functions of the scene name — no randomness —
 so the same scene name always renders byte-identical output (verified
@@ -31,19 +33,28 @@ def _chunk(tag: bytes, data: bytes) -> bytes:
     return length + tag + data + crc
 
 
-def write_png(path: str | Path, width: int, height: int, canvas: Canvas) -> None:
-    """Write an 8-bit RGB PNG (no interlace). Rows are per-pixel RGB tuples."""
+def png_bytes(width: int, height: int, canvas: Canvas) -> bytes:
+    """Encode an 8-bit RGB PNG (no interlace) to bytes.
+
+    Rows are per-pixel RGB tuples. Byte-for-byte what ``write_png`` puts
+    on disk, so the offline mock and manifest sources can hand the same
+    PNG bytes to consumers that never touch the filesystem.
+    """
     raw = b"".join(
         b"\x00" + b"".join(struct.pack("BBB", *pixel) for pixel in row)
         for row in canvas
     )
-    payload = (
+    return (
         b"\x89PNG\r\n\x1a\n"
         + _chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
         + _chunk(b"IDAT", zlib.compress(raw, 9))
         + _chunk(b"IEND", b"")
     )
-    Path(path).write_bytes(payload)
+
+
+def write_png(path: str | Path, width: int, height: int, canvas: Canvas) -> None:
+    """Write an 8-bit RGB PNG (no interlace). Rows are per-pixel RGB tuples."""
+    Path(path).write_bytes(png_bytes(width, height, canvas))
 
 
 def _canvas(day: bool) -> Canvas:
@@ -143,3 +154,8 @@ def render_scene(scene: str, path: str | Path) -> Path:
     painter = SCENES[scene]
     write_png(path, WIDTH, HEIGHT, painter())
     return Path(path)
+
+
+def render_scene_bytes(scene: str) -> bytes:
+    """Render one named scene straight to PNG bytes (no filesystem)."""
+    return png_bytes(WIDTH, HEIGHT, SCENES[scene]())
