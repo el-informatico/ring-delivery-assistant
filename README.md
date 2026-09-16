@@ -24,6 +24,19 @@ v1.1 example payloads are fixtures (`tests/fixtures/wire/`, provenance
 included) replayed through the same verify→…→routing path a real
 delivery takes.
 
+Real-ingestion readiness is built the same way — against documented
+contracts, with the live swap isolated to configuration. The server can
+**record** every delivery it receives (`RING_RECORD_DIR`) and
+`replay-webhooks` re-runs those captures through the identical
+live-wire edge, so registration day replaces the fixtures file, not the
+code. The documented **Events API** (event history, image snapshots)
+has a fail-closed client (`events_api.py`, Bearer auth) tested against
+an offline mock transport; live use is one env var (`RING_API_TOKEN`).
+Snapshot **classification** runs pixel rules over decoded PNGs keyed
+`<device>@<epoch_ms>` — the API's own keying — with the offline
+manifest source standing in for the live one; the first scripted-day
+artifact lives in `.timeline/timeline.md`.
+
 See `USAGE.md` for exact commands and `VALIDATION.md` for test/demo
 output and honest caveats.
 
@@ -48,9 +61,10 @@ live Ring webhooks              synthetic / internal payloads
    schema.py                 Ring payload -> frozen RingEvent (UTC-normalized)
         │
         ▼
-   classify.py / llm.py      event -> Intent (protocol; rules stub or
+   classify.py / llm.py      event -> Intent (protocol; rules stub,
+        │                     pixel rules over decoded snapshots, or
         │                     OpenAI-compatible multimodal endpoint)
-        ▼
+        ▼                     snapshots arrive via snapshots.py sources
    state.py                  append-only event log -> derived package
         │                     tracks (SQLite), survives out-of-order arrival
         ▼
@@ -75,6 +89,18 @@ live Ring webhooks              synthetic / internal payloads
   the optional FastAPI adapter (`server.py`, `[server]` extra) —
   `handle()` for the internal contract, `handle_v1_1()` for the live
   wire; everything downstream of the edge is shared.
+- `capture.py` is the record/replay harness: the server appends every
+  delivery (body, headers, outcome, status) to a JSONL capture;
+  `replay-webhooks` feeds fixtures or captures through the same edge.
+  Captures carry no secrets — replay re-signs locally — and recording
+  can never fail a delivery.
+- `events_api.py` + `snapshots.py` implement the documented Events API
+  (Bearer auth, JSON:API event history, two-step pre-signed snapshot
+  download) behind an injected transport, plus the offline sources that
+  mirror its `(device, epoch-ms)` keying. Missing media degrades to
+  event-only classification; misconfiguration raises.
+- `timeline.py` plays a scripted day through the live-wire edge and
+  writes the `.timeline/` artifact (see Quick start).
 - `settings.py` defines the whole environment contract (see
   `.env.example`); nothing is hardcoded.
 
@@ -118,8 +144,10 @@ apply. Consequences:
 
 ```bash
 uv sync                   # core: zero runtime dependencies
-uv run pytest             # 184 tests, offline
+uv run pytest             # 281 tests, offline
 uv run demo               # end-to-end timeline (deterministic)
+uv run timeline           # scripted day -> .timeline/timeline.md
+uv run replay-webhooks    # re-run documented fixtures or a capture
 ```
 
 Details: `USAGE.md`. Validation evidence: `VALIDATION.md`.

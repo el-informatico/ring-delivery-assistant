@@ -19,7 +19,7 @@ runtime dependencies at all — the core is pure stdlib.
 
 ```bash
 uv run pytest
-# 184 passed, 2 warnings in ~1s   (warnings come from fastapi's own
+# 281 passed, 2 warnings in ~2.5s  (warnings come from fastapi's own
 #                                  testclient shim, not this codebase)
 ```
 
@@ -31,6 +31,9 @@ uv run pytest tests/test_schema.py     # payload normalization
 uv run pytest tests/test_ingest.py     # webhook entry + error layering
 uv run pytest tests/test_synth.py      # generator determinism
 uv run pytest tests/test_classify.py   # rule-stub table
+uv run pytest tests/test_classify_snapshot.py # pixel rules over decoded snapshots
+uv run pytest tests/test_snapshots.py  # PNG decoder + snapshot sources
+uv run pytest tests/test_events_api.py # Events API client (mock transport)
 uv run pytest tests/test_llm.py        # LLM adapter (fake transport)
 uv run pytest tests/test_state.py      # state machine transitions
 uv run pytest tests/test_routing.py    # routing rules + sinks
@@ -38,6 +41,8 @@ uv run pytest tests/test_replay.py     # end-to-end pipeline
 uv run pytest tests/test_wire.py       # live v1.1 wire contract (docs fixtures)
 uv run pytest tests/test_server.py     # FastAPI adapter (TestClient)
 uv run pytest tests/test_server_live.py # FastAPI adapter in live-wire mode
+uv run pytest tests/test_capture.py    # record/replay harness (JSONL captures)
+uv run pytest tests/test_timeline.py   # the scripted-day demo + artifact
 ```
 
 ## Generate a synthetic event stream
@@ -66,6 +71,54 @@ a deterministic timeline plus a summary. Artifacts land in `.demo/`
 
 Secrets: the demo signs with `RING_WEBHOOK_SECRET` when set, otherwise
 a clearly-labeled synthetic `demo-webhook-secret`.
+
+## Replay: documented or captured webhooks
+
+```bash
+uv run replay-webhooks                                  # the docs' own
+                                                        # example envelopes
+                                                        # (tests/fixtures/wire/)
+uv run replay-webhooks .timeline/webhooks.jsonl         # a capture file
+uv run replay-webhooks .timeline/webhooks.jsonl --snapshots .timeline
+uv run replay-webhooks capture/webhooks.jsonl --include-rejected --db replay.db
+```
+
+One code path for both sources: `Pipeline.handle_v1_1`, the live-wire
+edge. Fixtures are the documented example payloads; captures are what
+the server records when `RING_RECORD_DIR` is set (see below) — same
+signed-body shape, so registration day swaps the file, not the
+command. Captures hold no secrets: replay re-signs each body with the
+local secret (`RING_WEBHOOK_SECRET` or the demo key).
+
+Classification is platform-fields-only by default; `--snapshots DIR`
+points the classifier at the offline snapshot source in `DIR`
+(`manifest.json` + images, the shape `uv run timeline` writes). With
+it, replaying a timeline capture reproduces the original day row for
+row. `--include-rejected` re-runs refused deliveries too (diagnosis
+mode); `--db` keeps the derived state instead of throwing it away.
+
+## Timeline: one scripted day, as an artifact
+
+```bash
+uv run timeline                 # writes .timeline/
+uv run timeline --out /tmp/day
+```
+
+Plays a scripted Friday — deposit, van, ding, its own redelivery,
+pickup, a three-motion burst, a 22:41 ring — through the live-wire
+edge with snapshot classification, and writes:
+
+- `.timeline/timeline.md` — the artifact: timeline table (platform
+  said vs snapshot said), the notifications that would have gone out,
+  caveats;
+- `.timeline/webhooks.jsonl` — the day as a capture (replay it, see
+  above);
+- `.timeline/manifest.json` + `snapshots/` — the offline snapshot
+  source, keyed `<device>@<epoch_ms>` exactly like the Image
+  Snapshots API;
+- `.timeline/state.db` — the tracks the day derived (gitignored).
+
+Regeneration is byte-identical: the artifact is diffable in review.
 
 ## Optional webhook server
 
@@ -112,6 +165,18 @@ The server refuses to start without `RING_WEBHOOK_SECRET` (fail-closed).
 Classifier selection is automatic: LLM when the full `RING_LLM_*`
 contract is in the environment, rule stub otherwise.
 
+Set `RING_RECORD_DIR` to capture live traffic as it arrives:
+
+```bash
+RING_RECORD_DIR=capture uv run --extra server uvicorn ring_assistant.server:app --port 8000
+# every delivery (accepted, ignored, rejected) lands in
+# capture/webhooks.jsonl — then, offline:
+uv run replay-webhooks capture/webhooks.jsonl
+```
+
+Recording never fails a delivery: if the capture file cannot be
+written the server warns on stderr and serves on.
+
 ## Library use
 
 ```python
@@ -140,9 +205,38 @@ instead — same downstream path, different edge (`wire.py` adapts the
 JSON:API envelope; documented-but-ignored event types raise
 `UnsupportedEvent` for you to ack and drop).
 
+Snapshot classification is the same kind of swap — one protocol
+(`SnapshotSource`), two implementations:
+
+```python
+from pathlib import Path
+
+from ring_assistant.classify import SnapshotRuleClassifier
+from ring_assistant.events_api import RingApiClient
+from ring_assistant.snapshots import ApiSnapshotSource, ManifestSnapshotSource
+
+# offline today: manifest keyed <device>@<epoch_ms>, like the API
+source = ManifestSnapshotSource(
+    root=Path(".timeline"), manifest_path=Path(".timeline/manifest.json")
+)
+# registration day, when RING_API_TOKEN is set:
+# source = ApiSnapshotSource(
+#     client=RingApiClient(access_token=settings.api_token,
+#                          base_url=settings.api_base_url)
+# )
+classifier = SnapshotRuleClassifier(source=source)
+```
+
+A missing or undecodable snapshot degrades to the platform-fields
+classifier — an event is never failed for want of an image. JPEG bytes
+(the real snapshot format) are refused by the stdlib rules decoder on
+purpose: they belong to the LLM adapter (`llm.py` attaches them as
+data URIs via the same `SnapshotSource`).
+
 ## Environment contract
 
 See `.env.example` — every knob (signature header name, LLM endpoint /
 model / key / timeout, notification webhook URL, night hours, burst
-threshold and window, DB path) is documented there and read only from
-the environment. No secret is ever hardcoded or committed.
+threshold and window, DB path, capture directory, Events API base
+URL / token / timeout) is documented there and read only from the
+environment. No secret is ever hardcoded or committed.

@@ -7,7 +7,7 @@ Everything here was produced on 2026-09-16 by the commands in
 
 ```
 $ uv run pytest
-184 passed, 2 warnings in 1.25s
+281 passed, 2 warnings in 2.52s
 ```
 
 The two warnings come from `fastapi`'s own testclient shim
@@ -30,6 +30,11 @@ Breakdown by area (collected test counts):
 | `tests/test_wire.py` | 34 | live v1.1 contract: docs-fixture adaptation, epoch-ms→UTC, UnsupportedEvent vs SchemaError, raw-bytes signature binding, duplicate redelivery, full offline path to routing |
 | `tests/test_server.py` | 9 | FastAPI adapter: 200/401/400 mapping, idempotent duplicate, fail-closed startup |
 | `tests/test_server_live.py` | 5 | FastAPI adapter in live-wire mode: v1.1 accept, ignored-type acks 200, 401/400, default app serves v1.1 |
+| `tests/test_events_api.py` | 25 | documented Events API client: Bearer auth fail-closed, event-history pagination + `event_types` filter, two-step snapshot download (303 → pre-signed GET), documented error codes — all via injected mock transport |
+| `tests/test_snapshots.py` | 23 | stdlib PNG decoder (filters 0–4, verbatim pixels, CRC, truncation, profile limits) + snapshot sources: manifest keying, API degrade-vs-raise split, composition |
+| `tests/test_classify_snapshot.py` | 20 | snapshot classifier: six-scene calibration pin, night-wheel collision gate, threshold margins, degradation paths, LLM source priority, manifest/API end-to-end |
+| `tests/test_capture.py` | 17 | record/replay harness: JSONL round-trip, never-crash replay loop, original `received_at`, local re-signing of foreign captures, server-side recording of every outcome, recorded-traffic-replays-offline |
+| `tests/test_timeline.py` | 12 | the scripted day: per-beat outcomes, redelivery dedupe, burst digest on the third, night escalation, artifact contents, capture replay parity, byte-identical regeneration |
 
 ## Demo run
 
@@ -82,7 +87,58 @@ Rows worth reading closely:
   event) is the duplicate redelivery: suppressed, pipeline state
   unchanged.
 
-## Server adapter verification
+## Timeline run (S2: scripted day, real-ingestion path)
+
+```
+$ uv run timeline
+```
+
+Captured output (the table is the same `format_timeline` the demo
+prints; trimmed to the rows and summary):
+
+```
+occurred              event     signal                              intent                action    transition          reason
+----------------------------------------------------------------------------------------------------------------------------------------
+2026-05-15 08:03:21  ..._motion_detected_1778832201210  motion_detected   package_deposited     NOTIFY    track_opened        intent=package_deposited
+2026-05-15 08:04:02  ..._motion_detected_1778832242805  motion_detected/vehicle  vehicle_at_door NOTIFY  no_track_change     intent=vehicle_at_door
+2026-05-15 09:12:47  ..._button_press_1778836367338     ding              person_at_door        NOTIFY    no_track_change     intent=person_at_door
+2026-05-15 09:12:47  ..._button_press_1778836367338     ding              person_at_door        SUPPRESS  duplicate           event ..._button_press_1778836367338 already applied
+2026-05-15 12:47:05  ..._motion_detected_1778849225062  motion_detected/human  package_picked_up NOTIFY  track_closed        intent=package_picked_up
+2026-05-15 13:30:00  ..._motion_detected_1778851800500  motion_detected   motion_noise          SUPPRESS  no_track_change     lone unclassified motion (1/3 in window)
+2026-05-15 13:34:18  ..._motion_detected_1778852058120  motion_detected   motion_noise          SUPPRESS  no_track_change     lone unclassified motion (2/3 in window)
+2026-05-15 13:38:41  ..._motion_detected_1778852321977  motion_detected   motion_noise          NOTIFY    no_track_change     intent=motion_noise
+2026-05-15 22:41:09  ..._button_press_1778884869104     ding              person_at_door        ESCALATE  no_track_change     intent=person_at_door night=True -> escalate all sinks
+
+  [critical] 22:41:09 Person at the door at night: ...: person detected at 22:41 (night window).
+
+9 deliveries, 6 notifications
+artifact: .timeline/timeline.md
+capture:  .timeline/webhooks.jsonl
+replay:   uv run replay-webhooks .timeline/webhooks.jsonl --snapshots .timeline
+```
+
+The artifact is committed at `.timeline/timeline.md` (full table with
+per-row "platform said vs snapshot said", notifications, caveats).
+The row worth reading closely is 08:03:21 — on the wire it is bare
+`motion_detected` (no sub_type), and only the snapshot (a package on
+the mat) makes it a deposit that opens a track; five hours later the
+pickup closes it. Regeneration is byte-identical (`md5sum` across two
+runs, checked), so the artifact is diffable in review.
+
+### Replay parity
+
+```
+$ uv run replay-webhooks .timeline/webhooks.jsonl --snapshots .timeline
+replayed 9 delivery(ies): 9 accepted, 0 ignored, 0 rejected
+```
+
+The replayed day matches the original run row for row (pinned by
+`tests/test_timeline.py::test_capture_replays_to_the_same_day`).
+Without `--snapshots`, the same capture classifies from platform
+fields only — 08:03 reads as `motion_noise`, honestly demonstrating
+what the snapshot contributes.
+
+
 
 Three levels of evidence:
 
@@ -178,3 +234,25 @@ What this skeleton does NOT establish:
    implemented.** A captured valid body+signature pair replays within
    the duplicate-id guard only if the same `id`; genuine replay
    protection needs timestamp-nonce state.
+9. **Snapshot pixel rules are fixture-calibrated, not field-calibrated.**
+   The thresholds (box ≥ 2.5% of frame, person ≥ 0.5%, vehicle body
+   ≥ 5% AND wheels ≥ 1%) were measured against the six deterministic
+   synthetic scenes. Real Ring snapshots are watermarked JPEG — the
+   stdlib decoder refuses them by design, routing to the LLM adapter
+   — so the rules path's accuracy on real imagery is unmeasured until
+   live snapshots exist. The product insight stands regardless: the
+   documented motion sub_type vocabulary has no `package_delivery` on
+   the live wire, so SOME image consumer is required for package
+   intents from live traffic.
+10. **The Events API contract is documented, not observed.** The client
+   (`events_api.py`) is tested against an injected mock transport
+   honoring the documented shapes (Bearer auth, JSON:API history with
+   `page[key]` cursor, 303-redirect pre-signed snapshot download,
+   MEDIA_NOT_FOUND/RECORDING_NOT_READY/CORRUPT_RECORDING degrade
+   codes). No request has ever been sent to `api.amazonvision.com`;
+   `RING_API_TOKEN` is an input, and the token exchange that mints it
+   (from `RING_CLIENT_ID`/`RING_CLIENT_SECRET`) is not built yet.
+11. **Captures hold traffic data, not credentials.** Recorded
+   signatures are informational (replay re-signs locally), but capture
+   files do contain device ids, timestamps, and payload bodies. They
+   are fine to keep on the recording host; do not publish them.

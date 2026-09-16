@@ -1,7 +1,89 @@
 # STATUS — ring-delivery-assistant
 
-Build log. Last entry: 2026-09-16 (S1 — registration runbook +
-documented-wire adapter; 184 tests).
+Build log. Last entry: 2026-09-16 (S2 — real-ingestion readiness;
+281 tests).
+
+## S2 — real ingestion (readiness built, live swap pending the gate)
+
+Goal: replace the synthetic-only event flow with REAL-ingestion
+readiness — webhook replay, Events API adapter, real snapshot path —
+so registration day is a plug-in, not a rewrite. The owner has NOT
+completed portal registration (S1 Lane A still open), so everything
+below is built against the documented contracts and exercised offline.
+
+### What works offline, today
+
+- [x] **Replay engine** (`capture.py` + `replay-webhooks` CLI): the
+      served app records every delivery (body, headers, outcome,
+      status) to JSONL under `RING_RECORD_DIR`; recording can never
+      fail a delivery (OSError → stderr warning). Fixtures and
+      captures are the SAME shape — signed v1.1 bodies through ONE
+      edge (`Pipeline.handle_v1_1`) — so `replay_fixture_dir` today
+      and `replay_capture_file` on live traffic are the same code
+      path. Replay re-signs with the LOCAL secret (captures hold no
+      secrets; a capture recorded under another host's secret still
+      replays — tested) and replays preserve the ORIGINAL
+      `received_at`, so dedupe and burst windows behave as they did
+      live.
+- [x] **Events API adapter** (`events_api.py`): fail-closed Bearer
+      client for the documented surface — `GET /v1/users/me`, event
+      history with `page[key]` cursor and the literal-comma
+      `event_types` filter, and the two-step Image Snapshot download
+      (POST at_timestamp → 303 + pre-signed Location → GET without
+      Bearer → bytes + provenance headers). Documented no-media errors
+      (MEDIA_NOT_FOUND 416 / RECORDING_NOT_READY 425 /
+      CORRUPT_RECORDING 422) degrade; auth/transport/malformed raise.
+      All tested against an offline mock transport (`tests/
+      ring_api_mock.py`) — zero sockets anywhere in the suite.
+- [x] **Snapshot path through the classifier** (`snapshots.py` +
+      `SnapshotRuleClassifier`): stdlib PNG decode (filters 0–4,
+      CRC-checked), `SceneEvidence` fractions, decision ladder
+      (person+box → picked_up / box → deposited / person → person /
+      body AND wheels → vehicle / empty → platform fallback). Sources
+      keyed `(device_id, epoch_ms)` — the API's own keying, computed
+      exactly (whole seconds + microseconds, never float truncation):
+      `ManifestSnapshotSource` offline, `ApiSnapshotSource` live,
+      `CompositeSnapshotSource` to mix. Missing/undecodable snapshots
+      DEGRADE to the platform classifier — an event is never failed
+      for want of an image. JPEG (the real format) is refused by the
+      rules decoder on purpose and travels to `llm.py` as a data URI.
+- [x] **First live timeline demo** (`timeline.py` → `uv run
+      timeline`): a scripted Friday — deposit at 08:03 (wire says bare
+      motion; the snapshot says package), van, bell, its own
+      redelivery (DUPLICATE, suppressed), pickup closing the track,
+      a 3-motion burst (2 suppress + digest), a 22:41 ring
+      (ESCALATE, critical) — written to `.timeline/timeline.md` with
+      the day also emitted as a replayable capture. Regeneration is
+      byte-identical; the artifact is committed and diffable.
+      `replay-webhooks --snapshots` reproduces the day row for row.
+- [x] New knobs (`settings.py`, `.env.example`): `RING_RECORD_DIR`,
+      `RING_API_BASE_URL`, `RING_API_TOKEN`, `RING_API_TIMEOUT` —
+      all optional, empty = offline mode, secrets .env-only.
+- **Suite: 281 tests, 0 failures (~2.5 s)** — 184 prior + 97 new
+  (`test_events_api.py` 25, `test_snapshots.py` 23,
+  `test_classify_snapshot.py` 20, `test_capture.py` 17,
+  `test_timeline.py` 12), all offline.
+
+### What plugs in on registration day (no rewrite)
+
+1. `RING_WEBHOOK_SECRET` + `RING_SIGNATURE_HEADER=x-signature` in
+   `.env` → live deliveries verify (scheme already byte-identical).
+2. `RING_RECORD_DIR=capture` on the server → real traffic lands in
+   the same JSONL; `uv run replay-webhooks capture/webhooks.jsonl`
+   re-runs it — same command as the fixtures.
+3. `RING_API_TOKEN` in `.env` → `ApiSnapshotSource(client=
+   RingApiClient(...))` replaces the manifest source (one composition
+   change, tested contract) and snapshots come from the documented
+   download. Real snapshots are JPEG → the LLM path takes over from
+   the pixel rules automatically (decoder refuses JPEG by design).
+4. Still to build (S2 residue → next): the OAuth token exchange that
+   MINTS `RING_API_TOKEN` from `RING_CLIENT_ID`/`RING_CLIENT_SECRET`,
+   and the account-link stub going real.
+
+Honest caveats live in `VALIDATION.md` (items 9–11): pixel-rule
+thresholds are calibrated to the synthetic scenes, the Events API
+contract is documented-not-observed (mock-tested, zero live calls),
+and captures hold traffic data though never credentials.
 
 ## S1 — registration gate + documented-wire foundations
 
@@ -100,7 +182,9 @@ never blocks the buildable part.
 ## Next
 
 - [ ] S1 gate: human runs `docs/REGISTRATION-GUIDE.md` (≤ 19-Sep)
-- [ ] S2: OAuth token exchange + account linking (needs S1 client
-      credentials; endpoint stubs become real)
-- [ ] S3: snapshot classification over the LLM adapter (media scopes
-      from the Cameras and Doorbell group)
+- [ ] S2 residue: OAuth token exchange + account linking (needs S1
+      client credentials; endpoint stubs become real; mints
+      RING_API_TOKEN for the live snapshot source)
+- [ ] S3: snapshot classification over the LLM adapter with real
+      (watermarked JPEG) snapshots — the pixel rules stay as the
+      offline/calibration path
