@@ -2,8 +2,11 @@
 
 One ``handle`` call processes one webhook exactly as production would;
 the demo and the tests replay the SAME code path (``receive_webhook``
-is the production entry, not a test shortcut). Ordering inside
-``handle`` is deliberate:
+is the production entry, not a test shortcut). ``handle_v1_1`` is the
+live Ring wire entry — same downstream path, different edge (see
+``wire.py``); everything after the edge is shared, so internal replay
+and live traffic can never drift apart. Ordering inside both is
+deliberate:
 
   1. verify + normalize (raises SignatureError / WebhookError)
   2. classify with PRE-apply context (how many tracks are open BEFORE
@@ -28,6 +31,7 @@ from .ingest import receive_webhook
 from .routing import RoutingContext, RoutingDecision, Router, is_night
 from .schema import Intent, IntentResult, RingEvent
 from .state import ApplyResult, StateStore
+from .wire import receive_v1_1
 
 
 @dataclass(frozen=True)
@@ -56,9 +60,25 @@ class Pipeline:
         self.signature_header = signature_header
 
     def handle(self, body: bytes, headers: Mapping[str, str]) -> TimelineEntry:
+        """Internal contract: verify + parse a flat payload, process it."""
         event = receive_webhook(
             body, headers, self.secret, signature_header=self.signature_header
         )
+        return self.process(event)
+
+    def handle_v1_1(self, body: bytes, headers: Mapping[str, str]) -> TimelineEntry:
+        """Live Ring contract: verify raw bytes, adapt the v1.1 envelope.
+
+        Raises ``UnsupportedEvent`` for documented event types this
+        pipeline deliberately ignores — the host acks 200 and moves on
+        (see ``wire.py`` for why not 4xx).
+        """
+        event = receive_v1_1(
+            body, headers, self.secret, signature_header=self.signature_header
+        )
+        return self.process(event)
+
+    def process(self, event: RingEvent) -> TimelineEntry:
         # classify BEFORE apply: open_tracks is the world as the
         # classifier saw it when the event arrived
         classification_context = ClassificationContext(

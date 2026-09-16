@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "version": "1.1",
+    "time": "2026-02-13T13:39:57.200155525Z",
+    "request_id": "2ad45ade-1818-4154-813b-afdd8bcd8085",
+    "account_id": "ava1.ring.account.XXXYYY"
+  },
+  "data": {
+    "id": "ava1.ring.device.door001_motion_1786715596787",
+    "type": "motion_detected",
+    "attributes": {
+      "source": "ava1.ring.device.door001",
+      "source_type": "devices",
+      "timestamp": 1786715596787,
+      "timestamp_readable": "2026-08-14 08:53:16",
+      "sub_type": "motion",
+      "component_ids": ["0"]
+    },
+    "relationships": {
+      "devices": {
+        "links": {
+          "self": "/v1/devices/ava1.ring.device.door001"
+        }
+      }
+    }
+  }
+}

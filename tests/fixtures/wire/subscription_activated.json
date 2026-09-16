@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "version": "1.1",
+    "time": "2026-07-06T11:11:00Z",
+    "request_id": "3c4484f3-4605-4bad-920d-4583cd2bef69",
+    "account_id": "ava1.ring.account.XXXYYY"
+  },
+  "data": {
+    "id": "evt_subscription_001",
+    "type": "subscription_activated",
+    "attributes": {
+      "source": "subscriptions",
+      "source_id": "ava1.ring.subscription.XXXYYY",
+      "sub_type": "paid",
+      "plan_id": "plan_001",
+      "expires_at": "2026-08-06T00:00:00Z"
+    },
+    "relationships": {
+      "devices": {
+        "data": [
+          {
+            "type": "device",
+            "id": "ava1.ring.device.door001"
+          }
+        ]
+      },
+      "subscriptions": {
+        "links": {
+          "self": "/v1/accounts/ava1.ring.account.XXXYYY/subscriptions"
+        }
+      }
+    }
+  }
+}
