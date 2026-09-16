@@ -23,7 +23,7 @@ only, never wall-clock) so demo output is byte-reproducible.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Mapping
 
 from .classify import ClassificationContext, IntentClassifier
@@ -59,14 +59,34 @@ class Pipeline:
         self.router = router
         self.signature_header = signature_header
 
-    def handle(self, body: bytes, headers: Mapping[str, str]) -> TimelineEntry:
-        """Internal contract: verify + parse a flat payload, process it."""
+    def handle(
+        self,
+        body: bytes,
+        headers: Mapping[str, str],
+        *,
+        received_at: datetime | None = None,
+    ) -> TimelineEntry:
+        """Internal contract: verify + parse a flat payload, process it.
+
+        ``received_at`` overrides wall-clock arrival time (capture
+        replay wants the ORIGINAL arrival, not "now").
+        """
         event = receive_webhook(
-            body, headers, self.secret, signature_header=self.signature_header
+            body,
+            headers,
+            self.secret,
+            signature_header=self.signature_header,
+            received_at=received_at,
         )
         return self.process(event)
 
-    def handle_v1_1(self, body: bytes, headers: Mapping[str, str]) -> TimelineEntry:
+    def handle_v1_1(
+        self,
+        body: bytes,
+        headers: Mapping[str, str],
+        *,
+        received_at: datetime | None = None,
+    ) -> TimelineEntry:
         """Live Ring contract: verify raw bytes, adapt the v1.1 envelope.
 
         Raises ``UnsupportedEvent`` for documented event types this
@@ -74,7 +94,11 @@ class Pipeline:
         (see ``wire.py`` for why not 4xx).
         """
         event = receive_v1_1(
-            body, headers, self.secret, signature_header=self.signature_header
+            body,
+            headers,
+            self.secret,
+            signature_header=self.signature_header,
+            received_at=received_at,
         )
         return self.process(event)
 

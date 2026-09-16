@@ -10,6 +10,7 @@ dependencies = []
 [project.scripts]
 demo = "ring_assistant.demo:main"
 generate = "ring_assistant.synth:main"
+replay-webhooks = "ring_assistant.replay_cli:main"
 
 [project.optional-dependencies]
 server = [

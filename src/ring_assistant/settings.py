@@ -26,6 +26,8 @@ DEFAULT_MOTION_BURST_COUNT = 3
 DEFAULT_MOTION_BURST_WINDOW_MIN = 10
 DEFAULT_LLM_TIMEOUT_S = 20.0
 DEFAULT_DB_PATH = "ring-assistant.db"
+DEFAULT_API_BASE_URL = "https://api.amazonvision.com"  # documented Events API host
+DEFAULT_API_TIMEOUT_S = 10.0
 
 
 def load_env_file(path: str | Path = DEFAULT_ENV_FILE) -> bool:
@@ -102,6 +104,11 @@ class Settings:
     motion_burst_count: int = DEFAULT_MOTION_BURST_COUNT
     motion_burst_window_min: int = DEFAULT_MOTION_BURST_WINDOW_MIN
     db_path: str = DEFAULT_DB_PATH
+    # S2 real-ingestion knobs (all optional; empty = offline mode)
+    record_dir: str = ""  # RING_RECORD_DIR -> webhooks.jsonl capture
+    api_base_url: str = DEFAULT_API_BASE_URL  # Events API (snapshots/history)
+    api_token: str = ""  # RING_API_TOKEN (registration day; .env only)
+    api_timeout_s: float = DEFAULT_API_TIMEOUT_S
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -134,4 +141,8 @@ class Settings:
                 DEFAULT_MOTION_BURST_WINDOW_MIN,
             ),
             db_path=source.get("RING_DB_PATH", DEFAULT_DB_PATH),
+            record_dir=source.get("RING_RECORD_DIR", ""),
+            api_base_url=source.get("RING_API_BASE_URL", DEFAULT_API_BASE_URL),
+            api_token=source.get("RING_API_TOKEN", ""),
+            api_timeout_s=_get_float(source, "RING_API_TIMEOUT", DEFAULT_API_TIMEOUT_S),
         )
