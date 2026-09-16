@@ -24,6 +24,7 @@ from typing import Callable, Mapping
 
 from .classify import ClassificationContext
 from .schema import Intent, IntentResult, RingEvent
+from .snapshots import SnapshotSource
 
 Transport = Callable[[str, bytes, Mapping[str, str], float], bytes]
 """``transport(url, body, headers, timeout) -> response_bytes``.
@@ -65,8 +66,11 @@ def _urllib_transport(url: str, body: bytes, headers: Mapping[str, str], timeout
 class LLMClassifier:
     """Classify events via an OpenAI-compatible multimodal endpoint.
 
-    ``snapshot_root`` resolves relative ``event.snapshot_path`` values
-    to real fixture files (demo/synth artifacts). A missing snapshot
+    ``snapshot_source`` (any ``SnapshotSource`` — manifest, API, ...) is
+    consulted first and carries its own content type, so real JPEG
+    snapshots from the Events API travel as ``image/jpeg`` data URIs.
+    ``snapshot_root`` remains the simple fixture path for synthetic
+    payloads' relative ``snapshot_path`` values. A missing snapshot
     degrades to a text-only request instead of failing the event.
     """
 
@@ -74,6 +78,7 @@ class LLMClassifier:
     model: str
     api_key: str
     timeout_s: float = 20.0
+    snapshot_source: SnapshotSource | None = None
     snapshot_root: Path | None = None
     transport: Transport = _urllib_transport
 
@@ -105,6 +110,7 @@ class LLMClassifier:
             model=overrides.get("model", settings.llm_model),
             api_key=overrides.get("api_key", settings.llm_api_key),
             timeout_s=overrides.get("timeout_s", settings.llm_timeout_s),
+            snapshot_source=overrides.get("snapshot_source"),
             snapshot_root=overrides.get("snapshot_root"),
             transport=overrides.get("transport", _urllib_transport),
         )
@@ -112,12 +118,20 @@ class LLMClassifier:
     # -- request assembly -------------------------------------------------
 
     def _snapshot_data_uri(self, event: RingEvent) -> str | None:
+        if self.snapshot_source is not None:
+            image = self.snapshot_source.fetch(event)
+            if image is None:
+                return None
+            return f"data:{image.content_type};base64," + base64.b64encode(image.data).decode(
+                "ascii"
+            )
         if not event.snapshot_path or self.snapshot_root is None:
             return None
         path = Path(self.snapshot_root) / event.snapshot_path
         if not path.is_file():
             return None
-        return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+        media = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return "data:" + media + ";base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
     def _user_content(self, event: RingEvent, context: ClassificationContext) -> list[dict]:
         fields = {
