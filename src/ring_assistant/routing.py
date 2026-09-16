@@ -155,11 +155,18 @@ class Router:
 
     @classmethod
     def from_settings(cls, settings, *, extra_primary: Sink | None = None) -> "Router":
-        """Default wiring: log sink everywhere; webhook sink when configured.
+        """Default wiring: log sink everywhere; webhook/Telegram when configured.
 
         The recording ``LogSink`` joins both groups so the demo can print
-        a faithful "what would have gone out" summary offline.
+        a faithful "what would have gone out" summary offline. The
+        Telegram sink joins the same groups when the environment carries
+        ``TELEGRAM_BOT_TOKEN`` + ``TELEGRAM_CHAT_ID``; absent credentials
+        leave it out entirely (offline runs substitute the mock sink at
+        the composition point instead — see ``telegram.py``).
         """
+        # local import: telegram.py imports this module for the Sink types
+        from .telegram import telegram_sink_from_env
+
         log = LogSink()
         primary: list[Sink] = [log]
         secondary: list[Sink] = [log]
@@ -167,6 +174,10 @@ class Router:
             webhook = WebhookSink(url=settings.notify_webhook_url)
             primary.append(webhook)
             secondary.append(webhook)
+        telegram = telegram_sink_from_env(settings)
+        if telegram is not None:
+            primary.append(telegram)
+            secondary.append(telegram)
         if extra_primary is not None:
             primary.append(extra_primary)
         return cls(

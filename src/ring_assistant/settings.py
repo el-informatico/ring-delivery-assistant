@@ -25,6 +25,7 @@ DEFAULT_NIGHT_END = 6  # exclusive
 DEFAULT_MOTION_BURST_COUNT = 3
 DEFAULT_MOTION_BURST_WINDOW_MIN = 10
 DEFAULT_LLM_TIMEOUT_S = 20.0
+DEFAULT_TELEGRAM_TIMEOUT_S = 10.0
 DEFAULT_DB_PATH = "ring-assistant.db"
 DEFAULT_API_BASE_URL = "https://api.amazonvision.com"  # documented Events API host
 DEFAULT_API_TIMEOUT_S = 10.0
@@ -99,6 +100,10 @@ class Settings:
     llm_api_key: str = ""
     llm_timeout_s: float = DEFAULT_LLM_TIMEOUT_S
     notify_webhook_url: str = ""
+    # Telegram sink (S3 value layer; empty = sink not wired / mock mode)
+    telegram_bot_token: str = ""  # TELEGRAM_BOT_TOKEN (.env only)
+    telegram_chat_id: str = ""  # TELEGRAM_CHAT_ID (.env only)
+    telegram_timeout_s: float = DEFAULT_TELEGRAM_TIMEOUT_S
     night_start_hour: int = DEFAULT_NIGHT_START
     night_end_hour: int = DEFAULT_NIGHT_END
     motion_burst_count: int = DEFAULT_MOTION_BURST_COUNT
@@ -128,6 +133,11 @@ class Settings:
             llm_api_key=source.get("RING_LLM_API_KEY", ""),
             llm_timeout_s=_get_float(source, "RING_LLM_TIMEOUT", DEFAULT_LLM_TIMEOUT_S),
             notify_webhook_url=source.get("RING_NOTIFY_WEBHOOK_URL", ""),
+            telegram_bot_token=source.get("TELEGRAM_BOT_TOKEN", ""),
+            telegram_chat_id=source.get("TELEGRAM_CHAT_ID", ""),
+            telegram_timeout_s=_get_float(
+                source, "TELEGRAM_TIMEOUT", DEFAULT_TELEGRAM_TIMEOUT_S
+            ),
             night_start_hour=_get_int(
                 source, "RING_NIGHT_START", DEFAULT_NIGHT_START
             ),
