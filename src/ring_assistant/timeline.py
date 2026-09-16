@@ -85,7 +85,7 @@ class Beat:
 
 THE_DAY: tuple[Beat, ...] = (
     Beat(
-        "s2-001",
+        "s3-001",
         _t(8, 3, 21, 210),
         "motion_detected",
         "motion",
@@ -93,7 +93,7 @@ THE_DAY: tuple[Beat, ...] = (
         "courier leaves a box; the platform only says 'motion'",
     ),
     Beat(
-        "s2-002",
+        "s3-002",
         _t(8, 4, 2, 805),
         "motion_detected",
         "vehicle",
@@ -101,7 +101,7 @@ THE_DAY: tuple[Beat, ...] = (
         "delivery van still at the curb",
     ),
     Beat(
-        "s2-003",
+        "s3-003",
         _t(9, 12, 47, 338),
         "button_press",
         None,
@@ -109,25 +109,43 @@ THE_DAY: tuple[Beat, ...] = (
         "someone rings the bell",
     ),
     Beat(
-        "s2-004",
+        "s3-004",
         _t(9, 12, 47, 338),  # same event: a redelivery, not a second ring
         "button_press",
         None,
         "person-door",
         "Ring redelivers the same ding ~85 s later (retry)",
-        request_id="s2-003",
+        request_id="s3-003",
         received_lag=timedelta(seconds=89, milliseconds=162),
     ),
     Beat(
-        "s2-005",
+        "s3-005",
+        _t(10, 26, 53, 640),
+        "motion_detected",
+        "motion",
+        "package-mat",
+        "a second parcel lands next to the first (track refresh)",
+    ),
+    Beat(
+        "s3-006",
         _t(12, 47, 5, 62),
         "motion_detected",
         "human",
         "person-with-box",
-        "someone carries the box away",
+        "someone carries the boxes away",
     ),
     Beat(
-        "s2-006",
+        "s3-007",  # out of order: occurred 10:31, first seen 13:20
+        _t(10, 31, 18, 412),
+        "motion_detected",
+        "motion",
+        "package-mat",
+        "straggler: the 10:31 deposit motion's first delivery failed; the "
+        "retry lands at 13:20, after the pickup already closed the track",
+        received_lag=timedelta(hours=2, minutes=49, seconds=25, milliseconds=591),
+    ),
+    Beat(
+        "s3-008",
         _t(13, 30, 0, 500),
         "motion_detected",
         "motion",
@@ -135,7 +153,7 @@ THE_DAY: tuple[Beat, ...] = (
         "tree shadow (1st unclassified motion in the window)",
     ),
     Beat(
-        "s2-007",
+        "s3-009",
         _t(13, 34, 18, 120),
         "motion_detected",
         "motion",
@@ -143,7 +161,7 @@ THE_DAY: tuple[Beat, ...] = (
         "tree shadow again (2nd)",
     ),
     Beat(
-        "s2-008",
+        "s3-010",
         _t(13, 38, 41, 977),
         "motion_detected",
         "motion",
@@ -151,7 +169,7 @@ THE_DAY: tuple[Beat, ...] = (
         "tree shadow a third time (3rd -> digest)",
     ),
     Beat(
-        "s2-009",
+        "s3-011",
         _t(22, 41, 9, 104),
         "button_press",
         None,
@@ -286,7 +304,11 @@ def render_markdown(run: DayRun) -> str:
     out.append(
         "The 08:03 row is the S2 story in one line: the platform's own vocabulary "
         "never says `package_delivery` on the live wire, so the snapshot is what "
-        "turns unclassified motion into a deposit."
+        "turns unclassified motion into a deposit. The middle rows are the "
+        "cross-event state machine on a real sequence: 10:26 refreshes the open "
+        "track (second box), 12:47 closes it (pickup), and the 10:31 straggler "
+        "that finally arrives at 13:20 lands in a track the pickup already "
+        "closed — `deposit_superseded`, suppressed instead of re-alarming."
     )
     out.append("")
     out.append("## Notifications (what would have gone out)")
@@ -326,8 +348,9 @@ def render_markdown(run: DayRun) -> str:
     )
     out.append(
         "- `received_at` times are scripted (4 s after occurrence; the redelivery "
-        "+85 s), not measured network delay. Occurrence times carry milliseconds "
-        "because they are manifest keys, and the manifest keying is the API keying."
+        "+85 s; the straggler +2 h 49 m), not measured network delay. Occurrence "
+        "times carry milliseconds because they are manifest keys, and the "
+        "manifest keying is the API keying."
     )
     out.append(
         "- Signatures use the demo secret (or `RING_WEBHOOK_SECRET` when set). The "

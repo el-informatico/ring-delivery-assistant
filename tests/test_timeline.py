@@ -4,13 +4,15 @@
 (``Pipeline.handle_v1_1``) with the offline manifest snapshot source —
 the same composition registration day swaps for ``ApiSnapshotSource``.
 These tests pin the story the artifact tells: the snapshot overrules
-the platform on deposits, redeliveries dedupe, bursts digest on the
-third, and night escalates.
+the platform on deposits, redeliveries dedupe, a second box refreshes
+the open track, a straggler deposit superseded by the pickup stays
+quiet, bursts digest on the third, and night escalates.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 import pytest
 
@@ -41,7 +43,9 @@ EXPECTED_DAY = [
     (Intent.VEHICLE_AT_DOOR, Action.NOTIFY, Transition.NO_TRACK_CHANGE),
     (Intent.PERSON_AT_DOOR, Action.NOTIFY, Transition.NO_TRACK_CHANGE),
     (Intent.PERSON_AT_DOOR, Action.SUPPRESS, Transition.DUPLICATE),
+    (Intent.PACKAGE_DEPOSITED, Action.NOTIFY, Transition.TRACK_REFRESHED),
     (Intent.PACKAGE_PICKED_UP, Action.NOTIFY, Transition.TRACK_CLOSED),
+    (Intent.PACKAGE_DEPOSITED, Action.SUPPRESS, Transition.DEPOSIT_SUPERSEDED),
     (Intent.MOTION_NOISE, Action.SUPPRESS, Transition.NO_TRACK_CHANGE),
     (Intent.MOTION_NOISE, Action.SUPPRESS, Transition.NO_TRACK_CHANGE),
     (Intent.MOTION_NOISE, Action.NOTIFY, Transition.NO_TRACK_CHANGE),
@@ -91,6 +95,22 @@ def test_the_redelivery_is_the_same_event_seen_twice(run):
     assert retry.apply_result.transition is Transition.DUPLICATE
 
 
+def test_second_box_refreshes_the_open_track(run):
+    refresh = run.entries[4]
+    assert refresh.intent.intent is Intent.PACKAGE_DEPOSITED
+    assert refresh.apply_result.transition is Transition.TRACK_REFRESHED
+    assert refresh.decision.action is Action.NOTIFY
+
+
+def test_late_straggler_lands_in_the_closed_track_and_suppresses(run):
+    # occurred 10:31, first seen 13:20 — after the 12:47 pickup closed the
+    # track; the state machine says deposit_superseded, routing stays quiet
+    straggler = run.entries[6]
+    assert straggler.event.occurred_at < straggler.event.received_at - timedelta(hours=2)
+    assert straggler.apply_result.transition is Transition.DEPOSIT_SUPERSEDED
+    assert straggler.decision.action is Action.SUPPRESS
+
+
 def test_burst_digest_fires_on_the_third_motion_only(run):
     motions = [e for e in run.entries if e.intent.intent is Intent.MOTION_NOISE]
     assert [e.decision.action for e in motions] == [
@@ -108,11 +128,12 @@ def test_night_ring_escalates_with_critical_severity(run):
     assert last.decision.notification.severity.value == "critical"
 
 
-def test_notifications_are_the_expected_six(run):
+def test_notifications_are_the_expected_seven(run):
     assert [n.title for n in run.notifications] == [
         "Package deposited",
         "Vehicle at the door",
         "Person at the door",
+        "Package deposited",
         "Package picked up",
         "Repeated motion",
         "Person at the door at night",
@@ -168,6 +189,7 @@ def test_render_markdown_carries_the_story(run):
     assert "— (no verdict; platform fallback)" in markdown  # empty scenes
     assert "## Notifications (what would have gone out)" in markdown
     assert "Person at the door at night" in markdown
+    assert "deposit_superseded" in markdown  # the straggler's transition
     assert f"replay-webhooks {run.out_dir / CAPTURE_NAME} --snapshots" in markdown
     assert "## Caveats" in markdown
 
