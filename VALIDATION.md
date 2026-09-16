@@ -7,7 +7,7 @@ Everything here was produced on 2026-09-16 by the commands in
 
 ```
 $ uv run pytest
-145 passed, 2 warnings in 1.22s
+184 passed, 2 warnings in 1.25s
 ```
 
 The two warnings come from `fastapi`'s own testclient shim
@@ -27,7 +27,9 @@ Breakdown by area (collected test counts):
 | `tests/test_state.py` | 14 | every transition, out-of-order both directions, window expiry, persistence, scrambled arrival |
 | `tests/test_routing.py` | 24 | every rule, night escalation, burst digest, sinks, settings wiring |
 | `tests/test_replay.py` | 8 | end-to-end storyboard, bad-signature isolation, timeline determinism, demo parity |
+| `tests/test_wire.py` | 34 | live v1.1 contract: docs-fixture adaptation, epoch-ms→UTC, UnsupportedEvent vs SchemaError, raw-bytes signature binding, duplicate redelivery, full offline path to routing |
 | `tests/test_server.py` | 9 | FastAPI adapter: 200/401/400 mapping, idempotent duplicate, fail-closed startup |
+| `tests/test_server_live.py` | 5 | FastAPI adapter in live-wire mode: v1.1 accept, ignored-type acks 200, 401/400, default app serves v1.1 |
 
 ## Demo run
 
@@ -82,7 +84,7 @@ Rows worth reading closely:
 
 ## Server adapter verification
 
-Two levels of evidence:
+Three levels of evidence:
 
 1. **HTTP contract (in-process, full ASGI stack):** the nine tests in
    `tests/test_server.py` drive the app through `TestClient` — real
@@ -105,6 +107,16 @@ Two levels of evidence:
    server one — the in-process tests above are the HTTP-contract
    evidence.
 
+3. **Live wire contract (in-process, full ASGI stack):** the five tests
+   in `tests/test_server_live.py` drive the served app
+   (`build_default_app()` → `live_wire=True`) with Ring's **published
+   v1.1 example payloads** (`tests/fixtures/wire/`, provenance in
+   `PROVENANCE.md` there): signed accept, ignored-type acks
+   `200 {"status": "ignored"}`, bad signature 401, garbage 400.
+   Together with `tests/test_wire.py` (34 tests) this pins the whole
+   documented edge — signature scheme, envelope shape, epoch-ms time,
+   retry-idempotency — against the docs' own examples, offline.
+
 ## `ring-intent` adoption verdict
 
 **Not adopted — the package does not exist (yet).**
@@ -125,15 +137,25 @@ pipeline would need to change.
 
 What this skeleton does NOT establish:
 
-1. **Synthetic data only.** All events are generated (`synth.py`); no
-   Ring hardware or Ring API was ever contacted. Payload shapes follow
-   the documented webhook style (`ding` / `motion_detected` with
-   `sub_type`), but real payloads may have fields this schema rejects
-   or ignores (unknown fields are preserved in `raw`, not interpreted).
-2. **Signature header name is configurable, not pinned.** The HMAC
-   scheme (`sha256=<hexdigest>`) matches the documented style; the
-   exact header name a live Ring integration sends was not verified
-   against hardware, hence `RING_SIGNATURE_HEADER` exists.
+1. **Internal events are synthetic; the wire contract is documented,
+   not observed.** The storyboard comes from `synth.py`; the v1.1
+   fixtures are Ring's *published example payloads* (docs pages, cited
+   per fixture in `tests/fixtures/wire/PROVENANCE.md`). No live Ring
+   delivery has ever been received — registration is still pending —
+   so real-world variance beyond the docs (extra fields, timing skew,
+   undocumented event types) is unmeasured. The schema tolerates
+   unknown fields (preserved in `raw`, never interpreted) and the edge
+   degrades unknown event types to ack-and-ignore by design.
+2. **Signature scheme and header pinned to the docs, unverified
+   against a live sender.** `X-Signature: sha256=<hex HMAC-SHA256 of
+   the raw body>` is exactly as documented
+   (developer.amazon.com/docs/ring/api-documentation.html, "Webhook
+   Authentication & Verification"); the header name stays configurable
+   (`RING_SIGNATURE_HEADER`) so a divergence costs a config change,
+   not code. One pinned docs quirk: the motion example's
+   `timestamp_readable` is a local-time rendering (5 h off UTC) — the
+   adapter parses only the epoch-ms `timestamp`, which the docs
+   designate for all time calculations.
 3. **The LLM adapter has never talked to a live model.** Tests exercise
    it fully (request shape, multimodal data-URI attachment, response
    parsing, failure modes) through an injected fake transport. Prompt

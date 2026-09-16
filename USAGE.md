@@ -19,7 +19,7 @@ runtime dependencies at all — the core is pure stdlib.
 
 ```bash
 uv run pytest
-# 145 passed, 2 warnings in ~1s   (warnings come from fastapi's own
+# 184 passed, 2 warnings in ~1s   (warnings come from fastapi's own
 #                                  testclient shim, not this codebase)
 ```
 
@@ -35,7 +35,9 @@ uv run pytest tests/test_llm.py        # LLM adapter (fake transport)
 uv run pytest tests/test_state.py      # state machine transitions
 uv run pytest tests/test_routing.py    # routing rules + sinks
 uv run pytest tests/test_replay.py     # end-to-end pipeline
+uv run pytest tests/test_wire.py       # live v1.1 wire contract (docs fixtures)
 uv run pytest tests/test_server.py     # FastAPI adapter (TestClient)
+uv run pytest tests/test_server_live.py # FastAPI adapter in live-wire mode
 ```
 
 ## Generate a synthetic event stream
@@ -67,6 +69,11 @@ a clearly-labeled synthetic `demo-webhook-secret`.
 
 ## Optional webhook server
 
+The served app speaks the **live Ring wire contract** (webhook v1.1
+envelope, `X-Signature` header) — this is what you point Ring's staging
+endpoint at. For flat internal-payload replay, build the app yourself:
+`create_app(pipeline)` (no `live_wire`).
+
 ```bash
 cp .env.example .env       # then set at least RING_WEBHOOK_SECRET
 uv run --extra server uvicorn ring_assistant.server:app --port 8000
@@ -74,25 +81,28 @@ uv run --extra server uvicorn ring_assistant.server:app --port 8000
 
 Endpoints:
 
-- `POST /webhooks/ring` — raw body + `X-Ring-Signature` (or the header
-  your `.env` names). `200` accepted, `401` bad signature, `400`
+- `POST /webhooks/ring` — raw body + `X-Signature` (or the header your
+  `.env` names). `200` accepted, `200` ignored (documented event type
+  this pipeline doesn't consume), `401` bad signature, `400`
   well-signed but unusable payload.
 - `GET /healthz` — liveness.
 
-A quick signed request against it:
+A quick signed request against it, using a documented example payload:
 
 ```bash
 uv run python - <<'PY'
 import json, urllib.request
-from ring_assistant.synth import build_sequence
+from pathlib import Path
 from ring_assistant.verify import sign_payload
+from ring_assistant.wire import encode_v1_1
 
-body = json.dumps(build_sequence()[0]).encode()
+payload = json.loads(Path("tests/fixtures/wire/button_press.json").read_text())
+body = encode_v1_1(payload)
 req = urllib.request.Request(
     "http://127.0.0.1:8000/webhooks/ring",
     data=body,
     headers={"Content-Type": "application/json",
-             "X-Ring-Signature": sign_payload(body, "your-secret")},
+             "X-Signature": sign_payload(body, "your-secret")},
 )
 print(urllib.request.urlopen(req).read().decode())
 PY
@@ -124,6 +134,11 @@ for body, headers in signed_webhooks(build_sequence(), secret):
     entry = pipeline.handle(body, headers)
     print(entry.event.event_id, entry.decision.action.value)
 ```
+
+For live Ring v1.1 envelopes, call `pipeline.handle_v1_1(body, headers)`
+instead — same downstream path, different edge (`wire.py` adapts the
+JSON:API envelope; documented-but-ignored event types raise
+`UnsupportedEvent` for you to ack and drop).
 
 ## Environment contract
 
