@@ -1,0 +1,25 @@
+#!/bin/sh
+# Pre-commit gate for ring-delivery-assistant: runs the commit-time guards
+# and refuses the commit when any of them fails:
+#   1. sensitive-content tokens in staged added lines — host paths,
+#      sibling/local-infra project names
+#      (local list; disabled when the list is absent; see
+#      scripts/guard-sensitive-content.sh)
+# Wired via: git config core.hooksPath scripts/hooks
+# Rule text and rationale: scripts/hooks/README.md.
+#
+# Honest limits: `git commit --no-verify` bypasses these hooks, and the
+# sensitive-content check looks only at staged ADDED lines (binary
+# content is not scanned). They are tripwires, not containment — see
+# each guard's header for the full boundary note.
+#
+# POSIX sh: no bashisms — runs under dash/busybox as well as bash.
+
+set -u
+ROOT="$(git rev-parse --show-toplevel)" || {
+  echo "pre-commit: cannot determine repo root" >&2
+  exit 1
+}
+rc=0
+sh "$ROOT/scripts/guard-sensitive-content.sh" || rc=1
+exit "$rc"

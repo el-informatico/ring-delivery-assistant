@@ -1,0 +1,76 @@
+#!/bin/sh
+# Commit-message gate for ring-delivery-assistant: refuses AI-tool
+# ATTRIBUTION in commit messages — Co-Authored-By trailers naming an AI
+# vendor, "(generated|written|authored|assisted) with/by <vendor>"
+# phrasing, and the robot emoji — and refuses a message that contains a
+# configured sensitive token (same local list as
+# scripts/guard-sensitive-content.sh).
+#
+# Wired via: git config core.hooksPath scripts/hooks
+# (git silently ignores a non-executable hook — keep the exec bit).
+# Rule text and rationale: scripts/hooks/README.md.
+#
+# Honest limits: `git commit --no-verify` bypasses it, and it checks
+# only the message file handed to it. The attribution patterns are
+# SHAPE-based, not mention-based: a subject like "remove the <vendor>
+# path" and a human Co-Authored-By trailer pass the pattern check.
+# NOTE: if the local token list itself carries vendor names (a strict
+# zero-mention policy), the token check below will additionally block
+# any message that mentions them — the list decides, not this script.
+# In this repo the seed list deliberately carries NO vendor names:
+# this script's own detection regex contains them, so seeding them
+# would block every future edit of this file. Message-level vendor
+# attribution is guarded by the shape check above.
+# The token check never prints the token that matched, only that one
+# did; it is disabled (fail-open) when no local token list exists or
+# it is empty; a list that exists but is not a readable regular file
+# (chmod 000, a directory at the path, a dangling symlink) REFUSES the
+# commit — fail-closed parity with scripts/guard-sensitive-content.sh.
+#
+# POSIX sh: no bashisms — runs under dash/busybox as well as bash.
+
+set -u
+MSG_FILE="${1:-}"
+[ -f "$MSG_FILE" ] || exit 0
+
+VENDOR='(claude|anthropic|chatgpt|openai|copilot|gemini|gpt|llm|ai[- ]assistant)'
+
+if grep -inE "^[[:space:]]*co-authored-by:.*${VENDOR}" "$MSG_FILE" \
+   || grep -inE "(generated|written|authored|assisted)[[:space:]]+(with|by)[[:space:]]+[^.]*${VENDOR}" "$MSG_FILE" \
+   || grep -q '🤖' "$MSG_FILE"; then
+  echo "commit-msg: BLOCKED — AI-tool attribution detected in the commit message." >&2
+  echo "  This repository carries no AI-tool attribution in its history." >&2
+  echo "  Rule: scripts/hooks/README.md. Remove the attribution line(s)" >&2
+  echo "  and re-commit; do not use --no-verify." >&2
+  exit 1
+fi
+
+# Sensitive tokens in the message itself — the message is permanent
+# history, so the same rule as staged content applies (list lives in
+# the git dir, never tracked; see scripts/guard-sensitive-content.sh).
+TOKENS="$(git rev-parse --absolute-git-dir)/sensitive-tokens"
+if [ -e "$TOKENS" ] || [ -L "$TOKENS" ]; then
+  if [ ! -f "$TOKENS" ] || [ ! -r "$TOKENS" ]; then
+    echo "commit-msg: sensitive-tokens exists but is not a readable file; failing closed per design" >&2
+    exit 2
+  fi
+fi
+if [ -s "$TOKENS" ] && [ -r "$TOKENS" ]; then
+  PATTERNS="$(mktemp)" || {
+    echo "commit-msg: mktemp failed; failing closed per design" >&2
+    exit 2
+  }
+  trap 'rm -f "$PATTERNS"' EXIT
+  if ! tr -d '\r' < "$TOKENS" | sed -e '/^[[:space:]]*$/d' > "$PATTERNS"; then
+    echo "commit-msg: cannot sanitize token list; failing closed per design" >&2
+    exit 2
+  fi
+  if [ -s "$PATTERNS" ] && grep -iaFqf "$PATTERNS" "$MSG_FILE"; then
+    echo "commit-msg: BLOCKED — the commit message contains a configured sensitive token." >&2
+    echo "  Use a tokenized/category reference instead, then re-commit; do not" >&2
+    echo "  use --no-verify. Rule: scripts/hooks/README.md; list mechanism:" >&2
+    echo "  scripts/guard-sensitive-content.sh" >&2
+    exit 1
+  fi
+fi
+exit 0

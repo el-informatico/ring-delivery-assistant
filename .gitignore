@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+
+# Test and tool caches
+.pytest_cache/
+
+# Local configuration and secrets — never commit real values
+.env
+
+# Runtime artifacts
+*.db
+*.sqlite3
+
+# Generated demo/synthetic output (regenerate with: uv run generate / uv run demo)
+.demo/
+.synth/
