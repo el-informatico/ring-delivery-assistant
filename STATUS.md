@@ -1,7 +1,84 @@
 # STATUS — ring-delivery-assistant
 
-Build log. Last entry: 2026-09-16 (S2 — real-ingestion readiness;
-281 tests).
+Build log. Last entry: 2026-09-16 (S3 — value layer live; 323 tests).
+
+## S3 — value layer live (mock legs until credentials, swap is config)
+
+Goal: ding → classification → routed notification, working end to end
+and MEASURED (N ≥ 10 scripted events, latencies published in
+README §Value layer). The owner has not completed portal registration
+(S1 Lane A) and no `.env` exists, so the two network legs — LLM
+endpoint, Telegram Bot API — run through their deterministic offline
+stand-ins; each swap is documented and is configuration, not code.
+
+### What works offline, today
+
+- [x] **Telegram sink** (`telegram.py`): Bot API `sendMessage` with
+      severity-conditioned delivery — info → `disable_notification:
+      true` (silent push), critical → false (rings). Credentials
+      (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) are .env-only;
+      `telegram_sink_from_env` returns `None` when either is missing
+      (offline = simply not wired), and `mock_telegram_sink` swaps in
+      a recording transport so formatting, payload assembly, and the
+      `{"ok": true}` response parse all execute with no socket. A
+      non-ok Bot API answer raises `TelegramError` — a notification
+      nobody saw must not look like success. `Router.from_settings`
+      wires the live sink into both groups when configured.
+- [x] **Multimodal LLM classifier + rules fallback**
+      (`llm.py`): `LLMClassifier` speaks OpenAI-compatible
+      `/chat/completions`, attaches the snapshot as a base64 data URI
+      (content type from the source — real JPEG travels as JPEG).
+      Offline, `mock_vision_transport` answers as a vision model
+      would: it decodes the attached PNG with the same stdlib decoder
+      and the same pixel ladder (`verdict_from_evidence`) the rules
+      classifier uses, so mock verdicts == rules verdicts and the run
+      is deterministic; undecodable input (real Ring JPEG) degrades
+      to the platform fields — the honest answer for a vision-less
+      mock. `FallbackClassifier` makes "rules fallback if API
+      friction" structural: endpoint trouble degrades the ONE event
+      to the rules verdict, `source: "fallback:rules"` (visible).
+      `build_classifier` is the single composition point (server +
+      every CLI): LLM when fully configured, pixel rules when a
+      snapshot source is wired, plain stub otherwise; partial config
+      stays offline.
+- [x] **Cross-event state machine on a real sequence**
+      (`timeline.py`, 11 beats now): the scripted day gained a second
+      box at 10:26 (`track_refreshed`) and the 10:31 deposit whose
+      delivery failed upstream, landing 13:20 — inside the track the
+      12:47 pickup already closed (`deposit_superseded`, suppressed).
+      Day vocabulary now covers duplicate / opened / refreshed /
+      closed / superseded / orphan / no-change. Artifact regenerated,
+      still byte-identical across re-runs; `replay-webhooks
+      --snapshots` still reproduces it row for row.
+- [x] **Star metric, measured** (`star.py` → `uv run star-metric`):
+      plays the same 11 signed wire deliveries with `perf_counter`
+      timings per stage (`StageTimings` on every `TimelineEntry`;
+      timeline rendering ignores it, so `.timeline/` stayed
+      byte-identical). Publishes `.star/star-metric.md` (gitignored —
+      latencies belong to the machine that measured them): per-event
+      table + N/min/median/mean/p90 summary + live-vs-mock modes.
+      Measured offline run (README carries the table): N = 11, 7
+      routed notifications, 7 Telegram calls, median total 6.4 ms,
+      median classify 2.6 ms.
+- [x] New knobs (`settings.py`, `.env.example`):
+      `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_TIMEOUT` —
+      all optional, empty = offline mode, secrets .env-only.
+- **Suite: 323 tests, 0 failures (~6 s)** — 281 prior + 42 new
+  (`test_telegram.py` +13, `test_star.py` +8, `test_classify.py` +8,
+  `test_llm.py` +11, `test_timeline.py` +2), all offline, zero
+  sockets.
+
+### Going live (each is .env-only, no code change)
+
+1. `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in `.env` (README §Value
+   layer has the 4-step BotFather walkthrough) → star-metric and the
+   server deliver to the real Bot API; severity conditioning already
+   ships.
+2. `RING_LLM_ENDPOINT` + `RING_LLM_MODEL` + `RING_LLM_API_KEY` in
+   `.env` → every entry classifies via the real endpoint with the
+   rules fallback behind it.
+3. S1 gate (portal registration) → real webhooks/snapshots replace
+   the scripted day, per the S2 plug-in list.
 
 ## S2 — real ingestion (readiness built, live swap pending the gate)
 
@@ -185,6 +262,8 @@ never blocks the buildable part.
 - [ ] S2 residue: OAuth token exchange + account linking (needs S1
       client credentials; endpoint stubs become real; mints
       RING_API_TOKEN for the live snapshot source)
-- [ ] S3: snapshot classification over the LLM adapter with real
-      (watermarked JPEG) snapshots — the pixel rules stay as the
-      offline/calibration path
+- [ ] S3 live legs: `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` and/or
+      `RING_LLM_*` in `.env` (human, 2 minutes each — see README §Value
+      layer); real watermarked-JPEG snapshots through the LLM adapter
+      once the S1 gate passes (pixel rules stay the offline/calibration
+      path)

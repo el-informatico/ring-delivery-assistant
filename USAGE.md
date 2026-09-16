@@ -104,9 +104,10 @@ uv run timeline                 # writes .timeline/
 uv run timeline --out /tmp/day
 ```
 
-Plays a scripted Friday — deposit, van, ding, its own redelivery,
-pickup, a three-motion burst, a 22:41 ring — through the live-wire
-edge with snapshot classification, and writes:
+Plays a scripted Friday — deposit, van, ding, its own redelivery, a
+second box refreshing the open track, pickup, the late straggler
+deposit the pickup supersedes, a three-motion burst, a 22:41 ring —
+through the live-wire edge with snapshot classification, and writes:
 
 - `.timeline/timeline.md` — the artifact: timeline table (platform
   said vs snapshot said), the notifications that would have gone out,
@@ -119,6 +120,22 @@ edge with snapshot classification, and writes:
 - `.timeline/state.db` — the tracks the day derived (gitignored).
 
 Regeneration is byte-identical: the artifact is diffable in review.
+
+## Star metric: ding → notification, measured
+
+```bash
+uv run star-metric            # writes .star/star-metric.md
+```
+
+Plays the same scripted day with `perf_counter` timings per stage —
+edge, classify, state, route, deliver — and prints the summary: N,
+min/median/mean/p90 of ding → routed notification, plus the
+classification stage alone. Classification runs the full multimodal
+LLM call path (deterministic mock model until `RING_LLM_*` is
+configured); delivery reaches a Telegram sink (recording transport
+until `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are configured —
+README §Value layer has the 2-minute BotFather walkthrough). `.star/`
+is gitignored: latencies belong to the machine that measured them.
 
 ## Optional webhook server
 
@@ -238,5 +255,6 @@ data URIs via the same `SnapshotSource`).
 See `.env.example` — every knob (signature header name, LLM endpoint /
 model / key / timeout, notification webhook URL, night hours, burst
 threshold and window, DB path, capture directory, Events API base
-URL / token / timeout) is documented there and read only from the
-environment. No secret is ever hardcoded or committed.
+URL / token / timeout, Telegram bot token / chat id / timeout) is
+documented there and read only from the environment. No secret is
+ever hardcoded or committed.

@@ -7,7 +7,7 @@ Everything here was produced on 2026-09-16 by the commands in
 
 ```
 $ uv run pytest
-281 passed, 2 warnings in 2.52s
+323 passed, 2 warnings in 6.03s
 ```
 
 The two warnings come from `fastapi`'s own testclient shim
@@ -22,8 +22,8 @@ Breakdown by area (collected test counts):
 | `tests/test_schema.py` | 29 | payload normalization, lenient/strict fields, contract violations |
 | `tests/test_ingest.py` | 9 | webhook entry, header lookup, 401-vs-400 error layering |
 | `tests/test_synth.py` | 14 | determinism, storyboard shape, out-of-order pair, duplicate, PNG fixtures |
-| `tests/test_classify.py` | 13 | total rule table incl. `ding`+`vehicle`, context transparency |
-| `tests/test_llm.py` | 15 | adapter request shape, data-URI snapshot, prose/JSON parsing, failure modes — all via fake transport |
+| `tests/test_classify.py` | 21 | total rule table incl. `ding`+`vehicle`, context transparency, shared pixel ladder + platform verdict helpers |
+| `tests/test_llm.py` | 26 | adapter request shape, data-URI snapshot, prose/JSON parsing, failure modes, deterministic mock vision transport, `FallbackClassifier` degrade, `build_classifier` matrix — all via fake/mock transports, zero sockets |
 | `tests/test_state.py` | 14 | every transition, out-of-order both directions, window expiry, persistence, scrambled arrival |
 | `tests/test_routing.py` | 24 | every rule, night escalation, burst digest, sinks, settings wiring |
 | `tests/test_replay.py` | 8 | end-to-end storyboard, bad-signature isolation, timeline determinism, demo parity |
@@ -34,7 +34,9 @@ Breakdown by area (collected test counts):
 | `tests/test_snapshots.py` | 23 | stdlib PNG decoder (filters 0–4, verbatim pixels, CRC, truncation, profile limits) + snapshot sources: manifest keying, API degrade-vs-raise split, composition |
 | `tests/test_classify_snapshot.py` | 20 | snapshot classifier: six-scene calibration pin, night-wheel collision gate, threshold margins, degradation paths, LLM source priority, manifest/API end-to-end |
 | `tests/test_capture.py` | 17 | record/replay harness: JSONL round-trip, never-crash replay loop, original `received_at`, local re-signing of foreign captures, server-side recording of every outcome, recorded-traffic-replays-offline |
-| `tests/test_timeline.py` | 12 | the scripted day: per-beat outcomes, redelivery dedupe, burst digest on the third, night escalation, artifact contents, capture replay parity, byte-identical regeneration |
+| `tests/test_timeline.py` | 14 | the scripted day: per-beat outcomes, redelivery dedupe, track refresh, superseded straggler, burst digest on the third, night escalation, artifact contents, capture replay parity, byte-identical regeneration |
+| `tests/test_telegram.py` | 13 | Telegram sink: formatting markers, `sendMessage` payload, severity-conditioned `disable_notification`, Bot API ok/refused/unparseable answers, missing-creds gating, router wiring both groups, escalation reaches the sink |
+| `tests/test_star.py` | 8 | star metric: N ≥ 10, every stage measured, parity with the rules timeline, telegram severity conditioning end to end, injected live transport, summary statistics, artifact contents, CLI |
 
 ## Demo run
 
@@ -87,31 +89,26 @@ Rows worth reading closely:
   event) is the duplicate redelivery: suppressed, pipeline state
   unchanged.
 
-## Timeline run (S2: scripted day, real-ingestion path)
+## Timeline run (S2/S3: scripted day, real-ingestion path)
 
 ```
 $ uv run timeline
 ```
 
-Captured output (the table is the same `format_timeline` the demo
-prints; trimmed to the rows and summary):
+Captured output (the same `format_timeline` the demo prints; trimmed
+to the notifications and summary — the full table is below under
+Replay parity):
 
 ```
-occurred              event     signal                              intent                action    transition          reason
-----------------------------------------------------------------------------------------------------------------------------------------
-2026-05-15 08:03:21  ..._motion_detected_1778832201210  motion_detected   package_deposited     NOTIFY    track_opened        intent=package_deposited
-2026-05-15 08:04:02  ..._motion_detected_1778832242805  motion_detected/vehicle  vehicle_at_door NOTIFY  no_track_change     intent=vehicle_at_door
-2026-05-15 09:12:47  ..._button_press_1778836367338     ding              person_at_door        NOTIFY    no_track_change     intent=person_at_door
-2026-05-15 09:12:47  ..._button_press_1778836367338     ding              person_at_door        SUPPRESS  duplicate           event ..._button_press_1778836367338 already applied
-2026-05-15 12:47:05  ..._motion_detected_1778849225062  motion_detected/human  package_picked_up NOTIFY  track_closed        intent=package_picked_up
-2026-05-15 13:30:00  ..._motion_detected_1778851800500  motion_detected   motion_noise          SUPPRESS  no_track_change     lone unclassified motion (1/3 in window)
-2026-05-15 13:34:18  ..._motion_detected_1778852058120  motion_detected   motion_noise          SUPPRESS  no_track_change     lone unclassified motion (2/3 in window)
-2026-05-15 13:38:41  ..._motion_detected_1778852321977  motion_detected   motion_noise          NOTIFY    no_track_change     intent=motion_noise
-2026-05-15 22:41:09  ..._button_press_1778884869104     ding              person_at_door        ESCALATE  no_track_change     intent=person_at_door night=True -> escalate all sinks
+  [info    ] 08:03:21 Package deposited: ava1.ring.device.door001: a package was left at the door.
+  [info    ] 08:04:02 Vehicle at the door: ava1.ring.device.door001: a vehicle is at the door.
+  [info    ] 09:12:47 Person at the door: ava1.ring.device.door001: someone is at the door.
+  [info    ] 10:26:53 Package deposited: ava1.ring.device.door001: a package was left at the door.
+  [info    ] 12:47:05 Package picked up: ava1.ring.device.door001: the package was taken from the door.
+  [info    ] 13:38:41 Repeated motion: ava1.ring.device.door001: 3 unclassified motions in the last 10 min — worth a look.
+  [critical] 22:41:09 Person at the door at night: ava1.ring.device.door001: person detected at 22:41 (night window).
 
-  [critical] 22:41:09 Person at the door at night: ...: person detected at 22:41 (night window).
-
-9 deliveries, 6 notifications
+11 deliveries, 7 notifications
 artifact: .timeline/timeline.md
 capture:  .timeline/webhooks.jsonl
 replay:   uv run replay-webhooks .timeline/webhooks.jsonl --snapshots .timeline
@@ -119,26 +116,66 @@ replay:   uv run replay-webhooks .timeline/webhooks.jsonl --snapshots .timeline
 
 The artifact is committed at `.timeline/timeline.md` (full table with
 per-row "platform said vs snapshot said", notifications, caveats).
-The row worth reading closely is 08:03:21 — on the wire it is bare
+Rows worth reading closely: 08:03:21 — on the wire it is bare
 `motion_detected` (no sub_type), and only the snapshot (a package on
-the mat) makes it a deposit that opens a track; five hours later the
-pickup closes it. Regeneration is byte-identical (`md5sum` across two
-runs, checked), so the artifact is diffable in review.
+the mat) makes it a deposit that opens a track; 10:26:53 — a second
+box refreshes that open track; and 10:31:18 — the straggler deposit
+whose webhook delivery failed upstream and finally landed at 13:20,
+after the 12:47 pickup closed the track, so the state machine answers
+`deposit_superseded` and no notification fires. Regeneration is
+byte-identical (`sha256sum` across two runs, checked), so the artifact
+is diffable in review.
 
 ### Replay parity
 
 ```
 $ uv run replay-webhooks .timeline/webhooks.jsonl --snapshots .timeline
-replayed 9 delivery(ies): 9 accepted, 0 ignored, 0 rejected
+occurred              event     signal                              intent                action    transition          reason
+----------------------------------------------------------------------------------------------------------------------------------------
+2026-05-15 08:03:21  ava1.ring.device.door001_motion_detected_1778832201210  motion_detected                     package_deposited     NOTIFY    track_opened        intent=package_deposited
+2026-05-15 08:04:02  ava1.ring.device.door001_motion_detected_1778832242805  motion_detected/vehicle             vehicle_at_door       NOTIFY    no_track_change     intent=vehicle_at_door
+2026-05-15 09:12:47  ava1.ring.device.door001_button_press_1778836367338  ding                                person_at_door        NOTIFY    no_track_change     intent=person_at_door
+2026-05-15 09:12:47  ava1.ring.device.door001_button_press_1778836367338  ding                                person_at_door        SUPPRESS  duplicate           event ava1.ring.device.door001_button_press_1778836367338 already applied
+2026-05-15 10:26:53  ava1.ring.device.door001_motion_detected_1778840813640  motion_detected                     package_deposited     NOTIFY    track_refreshed     intent=package_deposited
+2026-05-15 12:47:05  ava1.ring.device.door001_motion_detected_1778849225062  motion_detected/human               package_picked_up     NOTIFY    track_closed        intent=package_picked_up
+2026-05-15 10:31:18  ava1.ring.device.door001_motion_detected_1778841078412  motion_detected                     package_deposited     SUPPRESS  deposit_superseded  deposit ava1.ring.device.door001_motion_detected_1778841078412 landed in track already closed by pickup ava1.ring.device.door001_motion_detected_1778849225062 (arrived out of order)
+2026-05-15 13:30:00  ava1.ring.device.door001_motion_detected_1778851800500  motion_detected   motion_noise          SUPPRESS  no_track_change     lone unclassified motion (1/3 in window)
+2026-05-15 13:34:18  ava1.ring.device.door001_motion_detected_1778852058120  motion_detected   motion_noise          SUPPRESS  no_track_change     lone unclassified motion (2/3 in window)
+2026-05-15 13:38:41  ava1.ring.device.door001_motion_detected_1778852321977  motion_detected   motion_noise          NOTIFY    no_track_change     intent=motion_noise
+2026-05-15 22:41:09  ava1.ring.device.door001_button_press_1778884869104  ding                                person_at_door        ESCALATE  no_track_change     intent=person_at_door night=True -> escalate all sinks
+
+replayed 11 delivery(ies): 11 accepted, 0 ignored, 0 rejected
 ```
 
-The replayed day matches the original run row for row (pinned by
-`tests/test_timeline.py::test_capture_replays_to_the_same_day`).
-Without `--snapshots`, the same capture classifies from platform
-fields only — 08:03 reads as `motion_noise`, honestly demonstrating
-what the snapshot contributes.
+The capture (received order) reproduces the day row for row against
+the manifest snapshot source, including the straggler's
+`deposit_superseded` row — pinned by
+`tests/test_timeline.py::test_capture_replays_to_the_same_day`, so the
+replay engine and the scripted day cannot drift apart: they share one
+edge and one state machine. Without `--snapshots`, the same capture
+classifies from platform fields only — 08:03 reads as `motion_noise`,
+honestly demonstrating what the snapshot contributes.
 
+## Star metric run (S3: ding → classification → routed notification)
 
+```
+$ uv run star-metric
+classifier: mock vision transport (no socket) · sink: mock Telegram transport (no socket)
+
+N = 11 events · ding -> routed notification: min 3.556 ms · median 6.172 ms · mean 6.008 ms · p90 6.961 ms
+classification stage: median 2.655 ms
+artifact: .star/star-metric.md
+```
+
+Same 11 signed wire deliveries as the timeline run, but through the
+LLM call path (deterministic mock model offline — verdicts match the
+pixel rules, pinned by `test_star_run_agrees_with_the_rules_timeline`)
+and a Telegram sink (recording transport offline), with `perf_counter`
+timings per stage. Timings vary run to run and belong to this machine;
+README §Value layer publishes one representative run's full
+per-event table. `.star/` is gitignored for exactly that reason.
+
+## Server (HTTP contract)
 
 Three levels of evidence:
 
@@ -256,3 +293,13 @@ What this skeleton does NOT establish:
    signatures are informational (replay re-signs locally), but capture
    files do contain device ids, timestamps, and payload bodies. They
    are fine to keep on the recording host; do not publish them.
+12. **Star-metric latencies exclude both network legs.** Offline, the
+   LLM call path answers from the deterministic mock vision transport
+   and Telegram delivery from a recording transport — no socket
+   either way. The measured stages are this pipeline's own work
+   (edge verify/normalize, request assembly + response parse, state,
+   routing, sink formatting); a live endpoint adds its RTT on top,
+   which no offline number here can honestly include. Timings are
+   also machine-specific (WSL2, Python 3.13) and vary run to run —
+   which is why `.star/` is gitignored and README §Value layer
+   publishes one representative run, clearly labeled.

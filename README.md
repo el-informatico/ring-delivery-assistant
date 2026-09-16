@@ -37,6 +37,15 @@ Snapshot **classification** runs pixel rules over decoded PNGs keyed
 manifest source standing in for the live one; the first scripted-day
 artifact lives in `.timeline/timeline.md`.
 
+The **value layer** follows the same discipline: the multimodal LLM
+classifier runs its full call path against a deterministic mock model
+(a real endpoint is configuration, not code, with rules-based fallback
+wrapping it), the Telegram sink speaks the real Bot API payload shape
+through a recording transport until `TELEGRAM_BOT_TOKEN` +
+`TELEGRAM_CHAT_ID` appear in `.env`, and the star metric — ding →
+classification → routed notification — is measured, not estimated
+(below).
+
 See `USAGE.md` for exact commands and `VALIDATION.md` for test/demo
 output and honest caveats.
 
@@ -63,15 +72,15 @@ live Ring webhooks              synthetic / internal payloads
         ▼
    classify.py / llm.py      event -> Intent (protocol; rules stub,
         │                     pixel rules over decoded snapshots, or
-        │                     OpenAI-compatible multimodal endpoint)
-        ▼                     snapshots arrive via snapshots.py sources
+        │                     OpenAI-compatible multimodal endpoint
+        ▼                     with rules fallback; snapshots via snapshots.py)
    state.py                  append-only event log -> derived package
         │                     tracks (SQLite), survives out-of-order arrival
         ▼
    routing.py                intent + transition + burst count -> decision
         │                     (notify / escalate / suppress) -> sinks
         ▼
-   LogSink | WebhookSink     delivery
+   LogSink | WebhookSink | TelegramSink   delivery
 ```
 
 - `wire.py` adapts Ring's **documented webhook v1.1 contract** at the
@@ -99,8 +108,16 @@ live Ring webhooks              synthetic / internal payloads
   download) behind an injected transport, plus the offline sources that
   mirror its `(device, epoch-ms)` keying. Missing media degrades to
   event-only classification; misconfiguration raises.
-- `timeline.py` plays a scripted day through the live-wire edge and
-  writes the `.timeline/` artifact (see Quick start).
+- `timeline.py` plays a scripted day (11 beats: deposit, redelivery,
+  track refresh, pickup, a late straggler the pickup supersedes, motion
+  burst, night ring) through the live-wire edge and writes the
+  `.timeline/` artifact (see Quick start).
+- `telegram.py` is the one routed sink a phone actually sees: Bot API
+  `sendMessage`, severity-conditioned (info → silent push, critical →
+  rings). Credentials live in `.env` only; absent credentials wire
+  nothing, and offline runs substitute a sink whose network leg is a
+  recorder — same formatting, payload, and response parsing.
+- `star.py` measures the star metric (below) over the scripted day.
 - `settings.py` defines the whole environment contract (see
   `.env.example`); nothing is hardcoded.
 
@@ -140,17 +157,101 @@ apply. Consequences:
   a 24 h window (`PAIRING_WINDOW`);
 - event ids are idempotent — redelivery is a no-op.
 
+The scripted day in `.timeline/timeline.md` exercises every row of
+that machine on one real sequence, including the awkward ones: a
+second box refreshing the open track, and the 10:31 deposit whose
+webhook delivery failed upstream and finally landed at 13:20 — after
+the pickup closed the track — so the machine answers
+`deposit_superseded` and routing stays quiet instead of re-alarming
+for a parcel that already left.
+
 ## Quick start
 
 ```bash
 uv sync                   # core: zero runtime dependencies
-uv run pytest             # 281 tests, offline
+uv run pytest             # 323 tests, offline
 uv run demo               # end-to-end timeline (deterministic)
 uv run timeline           # scripted day -> .timeline/timeline.md
+uv run star-metric        # measured ding -> notification latencies
 uv run replay-webhooks    # re-run documented fixtures or a capture
 ```
 
 Details: `USAGE.md`. Validation evidence: `VALIDATION.md`.
+
+## Value layer (S3)
+
+Three pieces, each live-configurable and offline-runnable:
+
+**Multimodal LLM classifier, rules fallback included.**
+`llm.py` speaks any OpenAI-compatible `/chat/completions` endpoint and
+attaches the event's snapshot as a base64 data URI. Offline, the full
+call path (request assembly, image encoding, response parsing) runs
+against `mock_vision_transport` — a deterministic stand-in that reads
+the attached PNG with the same decoder and pixel ladder as the rules
+path. `FallbackClassifier` wraps the LLM so a transport failure,
+timeout, or unusable reply degrades the ONE event to the rules verdict
+(`source: "fallback:rules"` — visible, never silent). The swap is
+configuration:
+
+```bash
+# .env — then every entry (server, CLIs) uses the LLM
+RING_LLM_ENDPOINT=https://api.example.com/v1
+RING_LLM_MODEL=vision-1
+RING_LLM_API_KEY=...
+```
+
+**Telegram notification sink.** Routed notifications reach one sink a
+phone actually sees. To go live (2 minutes, no code):
+
+1. Message [@BotFather](https://t.me/BotFather) on Telegram → `/newbot`
+   → follow the prompts → copy the bot token.
+2. Send any message to your new bot (it cannot initiate chats).
+3. Look up your numeric chat id (any "get my id" bot, or the Bot API's
+   `getUpdates`).
+4. Put both in `.env` (gitignored — never chat, never commit):
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456:ABC...
+   TELEGRAM_CHAT_ID=123456789
+   ```
+
+`uv run star-metric` then delivers to the real Bot API. Without the
+credentials the sink's network leg is a recorder: message formatting,
+payload assembly (`disable_notification` = true unless severity is
+critical — info arrives silently, night escalations ring), and Bot API
+response parsing all still execute, offline and deterministically.
+
+**Star metric — measured, not estimated.** `uv run star-metric` plays
+the scripted day (N = 11 events, all through the live v1.1 edge) with
+`perf_counter` timings per stage and writes `.star/star-metric.md`
+(gitignored — latencies belong to the machine that measured them).
+One measured run (WSL2, Python 3.13, offline legs):
+
+| id | intent | action | edge ms | classify ms | state ms | route ms | deliver ms | total ms |
+|---|---|---|---|---|---|---|---|---|
+| s3-001 | package_deposited ★ | notify | 0.087 | 2.691 | 3.590 | 0.081 | 0.046 | 6.495 |
+| s3-002 | vehicle_at_door ★ | notify | 0.044 | 2.747 | 3.743 | 0.058 | 0.047 | 6.638 |
+| s3-003 | person_at_door ★ | notify | 0.033 | 2.627 | 3.447 | 0.037 | 0.026 | 6.169 |
+| s3-004 | person_at_door | suppress | 0.021 | 2.735 | 0.043 | 0.023 | 0.000 | 2.823 |
+| s3-005 | package_deposited ★ | notify | 0.023 | 1.964 | 3.668 | 0.049 | 0.039 | 5.742 |
+| s3-006 | package_picked_up ★ | notify | 0.035 | 2.295 | 3.965 | 0.045 | 0.033 | 6.373 |
+| s3-007 | package_deposited | suppress | 0.025 | 2.805 | 3.637 | 0.047 | 0.000 | 6.515 |
+| s3-008 | motion_noise | suppress | 0.034 | 2.035 | 3.400 | 0.065 | 0.000 | 5.535 |
+| s3-009 | motion_noise | suppress | 0.031 | 2.744 | 4.556 | 0.083 | 0.000 | 7.413 |
+| s3-010 | motion_noise ★ | notify | 0.039 | 2.058 | 3.620 | 0.053 | 0.038 | 5.808 |
+| s3-011 | person_at_door ★ | escalate | 0.029 | 2.167 | 4.388 | 0.069 | 0.034 | 6.687 |
+
+**N = 11 events, 7 routed notifications, 7 Telegram `sendMessage`
+calls; ding → routed notification: min 2.823 ms · median 6.373 ms ·
+mean 6.018 ms · p90 6.687 ms. Classification stage alone: median
+2.627 ms.** ★ marks the events a routed notification left the sinks
+for. What is live vs mock in that run: classification ran the full
+multimodal call path against the deterministic mock model (no socket;
+a real endpoint adds its RTT), and delivery ran the real Telegram sink
+against the recording transport (no POST; a live chat adds the Bot API
+RTT). The two suppressed deposits show the value layer earning its
+keep: the redelivery (s3-004) dedupes in 2.8 ms total, and the
+superseded straggler (s3-007) costs no notification at all.
 
 ## License
 
