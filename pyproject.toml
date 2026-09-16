@@ -12,6 +12,7 @@ demo = "ring_assistant.demo:main"
 generate = "ring_assistant.synth:main"
 replay-webhooks = "ring_assistant.replay_cli:main"
 timeline = "ring_assistant.timeline:main"
+star-metric = "ring_assistant.star:main"
 
 [project.optional-dependencies]
 server = [

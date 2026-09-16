@@ -187,15 +187,10 @@ class DayRun:
     out_dir: Path = Path(".timeline")
 
 
-def run_day(out_dir: Path, *, secret: str, settings: Settings | None = None) -> DayRun:
-    """Play the scripted day; write snapshots, manifest, capture, state."""
-    settings = settings or Settings()
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+def write_snapshots(out_dir: Path) -> Path:
+    """Render THE_DAY's scenes + manifest under ``out_dir``; return the manifest path."""
     snapshots_dir = out_dir / SNAPSHOTS_DIRNAME
-    snapshots_dir.mkdir()
-
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
     for scene in sorted({beat.scene for beat in THE_DAY}):
         render_scene(scene, snapshots_dir / f"{scene}.png")
     manifest = {
@@ -204,6 +199,49 @@ def run_day(out_dir: Path, *, secret: str, settings: Settings | None = None) -> 
     }
     manifest_path = out_dir / MANIFEST_NAME
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest_path
+
+
+@dataclass(frozen=True)
+class DayDelivery:
+    """One beat as it actually hit the wire: signed bytes and the result."""
+
+    beat: Beat
+    body: bytes
+    headers: dict[str, str]
+    entry: TimelineEntry
+
+
+def deliver_day(pipeline: Pipeline) -> list[DayDelivery]:
+    """Deliver every beat of THE_DAY to the pipeline, in arrival order.
+
+    The envelopes are the real v1.1 wire format, signed with the
+    pipeline's own secret — this is the single construction site for the
+    scripted day's traffic (the timeline artifact and the star-metric
+    run both play it through their own pipelines).
+    """
+    deliveries: list[DayDelivery] = []
+    for beat in THE_DAY:
+        envelope = build_v1_1(
+            event_type=beat.event_type,
+            device_id=DEVICE,
+            timestamp_ms=epoch_ms(beat.occurred),
+            request_id=beat.effective_request_id,
+            sub_type=beat.sub_type,
+        )
+        body, headers = signed_v1_1(envelope, pipeline.secret)
+        entry = pipeline.handle_v1_1(body, headers, received_at=beat.received_at)
+        deliveries.append(DayDelivery(beat=beat, body=body, headers=headers, entry=entry))
+    return deliveries
+
+
+def run_day(out_dir: Path, *, secret: str, settings: Settings | None = None) -> DayRun:
+    """Play the scripted day; write snapshots, manifest, capture, state."""
+    settings = settings or Settings()
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
+    manifest_path = write_snapshots(out_dir)
 
     router = Router.from_settings(settings)
     pipeline = Pipeline(
@@ -216,28 +254,19 @@ def run_day(out_dir: Path, *, secret: str, settings: Settings | None = None) -> 
         signature_header="x-signature",
     )
 
-    entries: list[TimelineEntry] = []
-    records: list[CaptureRecord] = []
-    for beat in THE_DAY:
-        envelope = build_v1_1(
-            event_type=beat.event_type,
-            device_id=DEVICE,
-            timestamp_ms=epoch_ms(beat.occurred),
-            request_id=beat.effective_request_id,
-            sub_type=beat.sub_type,
+    deliveries = deliver_day(pipeline)
+    entries = [d.entry for d in deliveries]
+    records = [
+        CaptureRecord(
+            received_at=d.beat.received_at,
+            body=d.body,
+            headers=d.headers,
+            outcome="accepted",
+            status=200,
+            note=d.beat.story,
         )
-        body, headers = signed_v1_1(envelope, secret)
-        entries.append(pipeline.handle_v1_1(body, headers, received_at=beat.received_at))
-        records.append(
-            CaptureRecord(
-                received_at=beat.received_at,
-                body=body,
-                headers=headers,
-                outcome="accepted",
-                status=200,
-                note=beat.story,
-            )
-        )
+        for d in deliveries
+    ]
     write_capture(out_dir / CAPTURE_NAME, records)
     pipeline.store.close()
 

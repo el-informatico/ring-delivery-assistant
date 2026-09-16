@@ -17,13 +17,17 @@ deliberate:
   5. deliver to sinks
 
 ``format_timeline`` renders entries deterministically (event timestamps
-only, never wall-clock) so demo output is byte-reproducible.
+only, never wall-clock) so demo output is byte-reproducible. Each entry
+also carries :class:`StageTimings` — per-stage wall-clock latency in
+milliseconds, measured with ``time.perf_counter`` — which the star-metric
+runner reports and the timeline renderer ignores.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from time import perf_counter
 from typing import Mapping
 
 from .classify import ClassificationContext, IntentClassifier
@@ -35,12 +39,33 @@ from .wire import receive_v1_1
 
 
 @dataclass(frozen=True)
+class StageTimings:
+    """Wall-clock latency of each pipeline stage for one event (ms).
+
+    ``total_ms`` is the ding -> routed-notification latency the star
+    metric reports (edge through delivery). Timings are measurements of
+    THIS process on THIS machine — environment, not contract.
+    """
+
+    edge_ms: float  # verify (HMAC) + normalize (the v1.1 edge)
+    classify_ms: float  # classification (snapshot fetch + verdict)
+    state_ms: float  # state machine apply (append + rebuild + diff)
+    route_ms: float  # routing decision
+    deliver_ms: float  # sink delivery (log / Telegram / webhook)
+
+    @property
+    def total_ms(self) -> float:
+        return self.edge_ms + self.classify_ms + self.state_ms + self.route_ms + self.deliver_ms
+
+
+@dataclass(frozen=True)
 class TimelineEntry:
     event: RingEvent
     intent: IntentResult
     apply_result: ApplyResult
     decision: RoutingDecision
     delivered: int
+    timings: StageTimings | None = None  # None only for hand-built entries
 
 
 class Pipeline:
@@ -71,6 +96,7 @@ class Pipeline:
         ``received_at`` overrides wall-clock arrival time (capture
         replay wants the ORIGINAL arrival, not "now").
         """
+        start = perf_counter()
         event = receive_webhook(
             body,
             headers,
@@ -78,7 +104,8 @@ class Pipeline:
             signature_header=self.signature_header,
             received_at=received_at,
         )
-        return self.process(event)
+        edge_ms = (perf_counter() - start) * 1000
+        return self.process(event, edge_ms=edge_ms)
 
     def handle_v1_1(
         self,
@@ -93,6 +120,7 @@ class Pipeline:
         pipeline deliberately ignores — the host acks 200 and moves on
         (see ``wire.py`` for why not 4xx).
         """
+        start = perf_counter()
         event = receive_v1_1(
             body,
             headers,
@@ -100,9 +128,10 @@ class Pipeline:
             signature_header=self.signature_header,
             received_at=received_at,
         )
-        return self.process(event)
+        edge_ms = (perf_counter() - start) * 1000
+        return self.process(event, edge_ms=edge_ms)
 
-    def process(self, event: RingEvent) -> TimelineEntry:
+    def process(self, event: RingEvent, *, edge_ms: float | None = None) -> TimelineEntry:
         # classify BEFORE apply: open_tracks is the world as the
         # classifier saw it when the event arrived
         classification_context = ClassificationContext(
@@ -113,12 +142,17 @@ class Pipeline:
             ),
             open_tracks=self.store.open_track_count(event.device_id),
         )
+        mark = perf_counter()
         intent = self.classifier.classify(event, classification_context)
+        classify_ms = (perf_counter() - mark) * 1000
 
         # state next: transition + tracks this event causes
+        mark = perf_counter()
         apply_result = self.store.apply(event, intent.intent)
+        state_ms = (perf_counter() - mark) * 1000
 
         # route AFTER apply: burst count includes this event
+        mark = perf_counter()
         burst_count = self.store.recent_intents(
             event.device_id,
             Intent.MOTION_NOISE,
@@ -128,8 +162,24 @@ class Pipeline:
         decision = self.router.route(
             RoutingContext(event, intent, apply_result, burst_count)
         )
+        route_ms = (perf_counter() - mark) * 1000
+
+        mark = perf_counter()
         delivered = self.router.deliver(decision)
-        return TimelineEntry(event, intent, apply_result, decision, delivered)
+        deliver_ms = (perf_counter() - mark) * 1000
+
+        timings = (
+            StageTimings(
+                edge_ms=edge_ms or 0.0,
+                classify_ms=classify_ms,
+                state_ms=state_ms,
+                route_ms=route_ms,
+                deliver_ms=deliver_ms,
+            )
+            if edge_ms is not None
+            else None  # direct process() callers get no edge measurement
+        )
+        return TimelineEntry(event, intent, apply_result, decision, delivered, timings)
 
 
 _COL = "{time}  {event_id:<8}  {label:<34}  {intent:<20}  {action:<8}  {transition:<18}  {reason}"

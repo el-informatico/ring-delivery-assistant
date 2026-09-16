@@ -21,3 +21,7 @@ build/
 # Generated demo/synthetic output (regenerate with: uv run generate / uv run demo)
 .demo/
 .synth/
+
+# Star-metric runs: latencies belong to the machine that measured them
+# (regenerate with: uv run star-metric)
+.star/
