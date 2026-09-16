@@ -197,6 +197,17 @@ class SnapshotImage:
     origin: str = ""
 
 
+def epoch_ms(moment: datetime) -> int:
+    """Exact epoch milliseconds for a datetime.
+
+    Computed from whole seconds + the microsecond field instead of
+    ``int(moment.timestamp() * 1000)``, whose float multiply-and-
+    truncate is not exact by construction — and these milliseconds are
+    manifest and API keys, where off-by-one is a silent miss.
+    """
+    return int(moment.timestamp()) * 1000 + moment.microsecond // 1000
+
+
 class SnapshotSource(Protocol):
     """Fetches the image for an event, or None to degrade (never raises)."""
 
@@ -243,8 +254,8 @@ class ManifestSnapshotSource:
         return loaded if isinstance(loaded, dict) else {}
 
     def fetch(self, event: RingEvent) -> SnapshotImage | None:
-        epoch_ms = int(event.occurred_at.timestamp() * 1000)
-        relative = self._entries().get(f"{event.device_id}@{epoch_ms}")
+        key_ms = epoch_ms(event.occurred_at)
+        relative = self._entries().get(f"{event.device_id}@{key_ms}")
         if not relative:
             return None
         path = Path(self.root) / relative
@@ -273,9 +284,8 @@ class ApiSnapshotSource:
     degrade_codes: frozenset[str] = MEDIA_UNAVAILABLE_CODES
 
     def fetch(self, event: RingEvent) -> SnapshotImage | None:
-        epoch_ms = int(event.occurred_at.timestamp() * 1000)
         try:
-            snapshot = self.client.snapshot(event.device_id, epoch_ms)
+            snapshot = self.client.snapshot(event.device_id, epoch_ms(event.occurred_at))
         except EventsApiError as exc:
             if exc.code in self.degrade_codes:
                 return None

@@ -11,6 +11,7 @@ dependencies = []
 demo = "ring_assistant.demo:main"
 generate = "ring_assistant.synth:main"
 replay-webhooks = "ring_assistant.replay_cli:main"
+timeline = "ring_assistant.timeline:main"
 
 [project.optional-dependencies]
 server = [
