@@ -18,6 +18,54 @@ day edits must keep them true.
   AWS Builder mini only after deciding whether its criteria are met by
   what exists (see SUBMISSION-CHECKLIST §F; nothing AWS-deployed is
   built — never claim it).
+- **Priority category (Ring track):** business systems (primary) ·
+  IoT home automation (secondary) — fit argued in §Priority-category
+  fit below.
+
+## Priority-category fit (Ring track)
+
+The Ring track names five priority categories — "access control,
+business systems, IoT home automation, accessibility, and caretaking"
+(rules, verbatim) — and its creative-use-case list explicitly includes
+"package/delivery management" and "business system integration". We
+claim **business systems**: this is the receiving-operations layer for
+deliveries — deposit → pickup tracking per device, out-of-order
+straggler suppression, courier-vs-visitor discrimination,
+severity-conditioned routing — the workflow a front desk, a small
+business, or a household runs after the carrier scans the parcel. The
+**IoT home automation** angle is the device class itself: doorbell
+events are home-IoT telemetry, and the pipeline converts them into
+automated action (digests, night escalation, quiet suppression) with
+no human in the loop. The demo is, literally, the delivery-management
+use case the rules' creative list names.
+
+## Open Source mini — opt-in fields
+
+Official field list (rules, verbatim): "Provide contribution URL,
+project repository URL, GitHub username, and a description of what you
+did, how it works, and why it matters."
+
+- **Contribution URL:** the repository itself (solo project — the
+  commit history is the contribution record).
+- **Project repository URL:** `[publication-gated — paste after
+  SUBMISSION-CHECKLIST §E passes]`
+- **GitHub username:** `[owner fills — expected el-informatico]`
+- **Description (did / how it works / why it matters):** A
+  stdlib-only intent and routing layer for Ring doorbell webhooks:
+  signed events become intents (package deposited, package picked up,
+  person, vehicle, motion noise) via deterministic pixel rules or a
+  multimodal adapter, a cross-event state machine tracks deposit →
+  pickup per device (late stragglers suppressed, redeliveries no-ops),
+  and a rules engine decides who gets told what — Telegram,
+  severity-conditioned. 323 offline tests, zero sockets, Apache-2.0;
+  every network leg is a documented contract behind an env-only swap.
+
+**In-window note (pre-existing-work disclosure is trivially
+satisfied):** repository history starts 2026-09-16 — every commit
+falls inside the 31-Aug → 23-Oct submission window, and no pre-window
+history exists. Verified with `git log --format='%ai'` (first commit
+2026-09-16 12:03:07 -0500); re-run the same command on submission
+morning before pasting this claim.
 
 ---
 

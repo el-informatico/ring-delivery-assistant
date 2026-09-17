@@ -3,8 +3,9 @@
 **Deadline: 23-Oct-2026 12:00 PDT = 14:00 Lima (PET, UTC-5).**
 Submit the day before; Devpost locks hard.
 
-State as of 2026-09-16: everything the REPO can produce is done — text,
-script, diagram, pins, audit. What remains is HUMAN: the video
+State as of 2026-09-16 (friction log added 09-17): everything the REPO
+can produce is done — text, script, diagram, pins, audit, friction
+log. What remains is HUMAN: the video
 recording, the Devpost form, and the two standing gates (portal
 registration, publication approval).
 
@@ -33,6 +34,10 @@ S1 registration gate has completed by then.
       SUBMISSION.md §How we built it — Ring Webhook v1.1 + Events API
       (documented contracts), Telegram Bot API,
       OpenAI-compatible multimodal endpoint adapter.
+- [ ] Optional friction-log entries: paste `docs/FRICTION-LOG.md` rows
+      (F4 stays out until the registration session runs) — up to +10 %
+      judging bonus ("Participants who submit friction logs score
+      higher in judging", rules).
 
 ## C. Video [human records; script is repo-ready]
 
@@ -70,7 +75,9 @@ order:
 ## F. Mini tracks [human decides; honesty rule 5]
 
 - [ ] **Open Source mini** — eligible as-is once E passes: Apache-2.0,
-      README, CONTRIBUTING-by-issue, deterministic artifacts. Enter.
+      README, CONTRIBUTING-by-issue, deterministic artifacts. Enter;
+      opt-in fields drafted in `docs/SUBMISSION.md` §Open Source mini
+      (repo URL stays publication-gated until §E).
 - [ ] **AWS Builder mini** — nothing AWS-deployed is built. Enter ONLY
       with an honest scope statement (e.g., "runs locally; Lambda
       deployment is future work") or skip. Never claim a deployment.
@@ -114,8 +121,9 @@ dependencies**; `uv.lock` tracked and exact — fastapi 0.141.1, uvicorn
       with Telegram credentials so the mode line reads
       `live Telegram API` — then update SUBMISSION.md's qualifier
       wording to match what the recording actually shows.
-- [ ] Friction-log row 1 (registration friction) — the S1 deliverable;
-      the SUBMISSION.md §Challenges text stands in until it exists.
+- [ ] Friction-log row F4 (registration friction) — captured live into
+      `docs/FRICTION-LOG.md` F4 (marked UNVERIFIED until this session
+      runs; update the row in place, do not paraphrase from memory).
 - [ ] If live legs ran: refresh README §Value layer's representative
       run or add the live-run table beside it — never silently replace
       the offline table.
