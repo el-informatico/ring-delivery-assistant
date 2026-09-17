@@ -50,6 +50,9 @@ did, how it works, and why it matters."
 - **Project repository URL:** `[publication-gated — paste after
   SUBMISSION-CHECKLIST §E passes]`
 - **GitHub username:** `[owner fills — expected el-informatico]`
+- **License:** Apache-2.0 — full standard text at the repository root
+  ([`LICENSE`](../LICENSE), 201 lines, unmodified), matching the "Apache-2.0
+  repo" expectation stated for this mini track.
 - **Description (did / how it works / why it matters):** A
   stdlib-only intent and routing layer for Ring doorbell webhooks:
   signed events become intents (package deposited, package picked up,
