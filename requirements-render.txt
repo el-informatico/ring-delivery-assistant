@@ -1,0 +1,10 @@
+# Deploy-only dependencies (Render; see docs/DEPLOY-RENDER.md).
+# The library core stays dependency-free — these are installed next to
+# `pip install -e ".[server]"` only on the deploy target, so the local
+# suite and every offline CLI keep running without them.
+#
+# libsql: Turso's current Python client (successor of the deprecated
+# libsql-experimental, whose websocket drivers stopped working on
+# Turso's free tier in June 2026). Pinned: Rust-built wheels, treat
+# upgrades as deliberate.
+libsql==0.1.11

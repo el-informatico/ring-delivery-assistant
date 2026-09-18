@@ -1,0 +1,42 @@
+# Render Blueprint for the free-tier deploy (docs/DEPLOY-RENDER.md).
+#
+# Two ways to use it:
+#   * Blueprint flow: Render dashboard -> New -> Blueprint -> pick this
+#     repo; every `sync: false` var below then asks for its value in the
+#     dashboard (secrets are paste-only, never committed here).
+#   * Manual flow: New -> Web Service, same repo, and copy the commands
+#     below into the build/start fields by hand.
+#
+# fastapi/uvicorn come from the project's `server` extra; libsql comes
+# from requirements-render.txt.
+services:
+  - type: web
+    name: ring-delivery-assistant
+    runtime: python
+    plan: free
+    region: frankfurt # closest to the UK tunnel hop; latency-only choice
+    buildCommand: pip install -e ".[server]" -r requirements-render.txt
+    startCommand: uvicorn ring_assistant.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # --- secrets (paste in the dashboard; never in this file) --------
+      - key: RING_WEBHOOK_SECRET # from the local .env (HMAC key)
+        sync: false
+      - key: RING_CLIENT_ID # Ring portal credential
+        sync: false
+      - key: RING_CLIENT_SECRET # Ring portal credential
+        sync: false
+      - key: RING_TURSO_URL # `turso db show ring-staging --url`
+        sync: false
+      - key: RING_TURSO_TOKEN # `turso db tokens create ring-staging`
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN # optional: notify verdicts -> phone
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: RING_API_TOKEN # optional: Events API bearer (snapshots)
+        sync: false
+      # --- non-secrets (safe to keep inline) ----------------------------
+      - key: RING_SIGNATURE_HEADER
+        value: x-signature # the LIVE Ring header (see .env.example)
+      - key: PYTHON_VERSION
+        value: "3.13" # matches the version the suite runs on locally

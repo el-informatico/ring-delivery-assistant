@@ -1,5 +1,9 @@
 # Portal endpoints (staging tab) — paste-ready URLs
 
+Permanent replacement in flight: `docs/DEPLOY-RENDER.md` (Render + Turso)
+gives stable `*.onrender.com` URLs that never need re-pasting — this file's
+tunnel table remains current until that deploy is verified.
+
 Verified live on 2026-09-17 through the tunnel below (re-verified twice as
 the tunnel reconnected — the URL changes each reconnect; see below). Portal
 reference:

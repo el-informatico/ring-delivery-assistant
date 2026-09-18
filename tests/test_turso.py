@@ -69,9 +69,10 @@ def test_connect_turso_requires_both_coordinates():
 
 
 def test_missing_client_is_an_install_error(monkeypatch):
-    # None in sys.modules makes `import libsql_experimental` raise ImportError
+    # None in sys.modules makes `import ...` raise ImportError for each name
+    monkeypatch.setitem(sys.modules, "libsql", None)
     monkeypatch.setitem(sys.modules, "libsql_experimental", None)
-    with pytest.raises(TursoError, match="libsql-experimental"):
+    with pytest.raises(TursoError, match="requirements-render.txt"):
         _connect_libsql(URL, TOKEN)
 
 

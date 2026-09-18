@@ -14,11 +14,12 @@ Selection is configuration, not code: BOTH ``RING_TURSO_URL`` and
 byte-for-byte today's behavior (local dev). Half-configured is a startup
 error — fail-closed like every other credential seam in this repo.
 
-The real client (``libsql-experimental``) is imported lazily so the core
-stays dependency-free and offline; tests inject sqlite3 connections
-(same DBAPI subset, zero sockets) — the same documented-contract honesty
-as ``test_events_api``: Turso's wire behavior is exercised on the first
-deploy, not in the suite.
+The real client (the ``libsql`` package — Turso's current Python SDK,
+successor of the deprecated ``libsql-experimental``) is imported lazily
+so the core stays dependency-free and offline; tests inject sqlite3
+connections (same DBAPI subset, zero sockets) — the same
+documented-contract honesty as ``test_events_api``: Turso's wire
+behavior is exercised on the first deploy, not in the suite.
 """
 
 from __future__ import annotations
@@ -41,16 +42,26 @@ class TursoError(RuntimeError):
 
 
 def _connect_libsql(url: str, token: str):
-    """Open the real client — the only place the package is imported."""
+    """Open the real client — the only place the package is imported.
+
+    ``libsql`` is the current SDK (libsql-experimental is deprecated and
+    its websocket drivers stopped working on Turso's free tier in June
+    2026); the old name is still accepted if that is what is installed —
+    both expose the same ``connect`` surface.
+    """
     try:
-        import libsql_experimental as libsql
-    except ImportError as exc:  # pragma: no cover — exercised via monkeypatch
-        raise TursoError(
-            "the libsql client is not installed; install libsql-experimental "
-            "(see requirements-render.txt / docs/DEPLOY-RENDER.md) or unset "
-            "RING_TURSO_URL and RING_TURSO_TOKEN to use the file stores"
-        ) from exc
-    return libsql.connect(url, auth_token=token)
+        import libsql
+    except ImportError:
+        try:
+            import libsql_experimental as libsql
+        except ImportError as exc:
+            raise TursoError(
+                "the libsql client is not installed; install the libsql "
+                "package (see requirements-render.txt / docs/DEPLOY-RENDER.md) "
+                "or unset RING_TURSO_URL and RING_TURSO_TOKEN to use the "
+                "file stores"
+            ) from exc
+    return libsql.connect(database=url, auth_token=token)
 
 
 def connect_turso(url: str, token: str, *, connector=_connect_libsql):
