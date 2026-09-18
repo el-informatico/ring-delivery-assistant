@@ -114,6 +114,12 @@ class Settings:
     api_base_url: str = DEFAULT_API_BASE_URL  # Events API (snapshots/history)
     api_token: str = ""  # RING_API_TOKEN (registration day; .env only)
     api_timeout_s: float = DEFAULT_API_TIMEOUT_S
+    # OAuth token exchange (S2): client credentials from the portal +
+    # where a successful exchange persists its bundle (empty = in-memory
+    # only). RING_API_TOKEN above is what the exchange MINTS.
+    client_id: str = ""  # RING_CLIENT_ID (portal credential; .env only)
+    client_secret: str = ""  # RING_CLIENT_SECRET (portal credential; .env only)
+    token_store_path: str = ""  # RING_TOKEN_STORE (bundle JSON; gitignore it)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -155,4 +161,7 @@ class Settings:
             api_base_url=source.get("RING_API_BASE_URL", DEFAULT_API_BASE_URL),
             api_token=source.get("RING_API_TOKEN", ""),
             api_timeout_s=_get_float(source, "RING_API_TIMEOUT", DEFAULT_API_TIMEOUT_S),
+            client_id=source.get("RING_CLIENT_ID", ""),
+            client_secret=source.get("RING_CLIENT_SECRET", ""),
+            token_store_path=source.get("RING_TOKEN_STORE", ""),
         )

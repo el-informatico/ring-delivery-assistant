@@ -130,13 +130,80 @@ def test_portal_endpoint_stubs(client):
     assert "Account linking" in r.text
     assert "US-located devices" in r.text
 
-    # Token exchange: 501 pending, and it must NOT swallow the code silently.
+    # Token exchange without credentials: honest 501, code not swallowed.
     r = client.get("/oauth/callback")
-    assert r.status_code == 501
-    assert r.json()["error"] == "not_implemented"
-    assert r.json()["code_received"] is False
+    assert r.status_code == 400
+    assert r.json()["error"] == "bad_request"
     r = client.get("/oauth/callback?code=SplwbOjb64&state=xyz")
     assert r.status_code == 501
-    assert r.json()["code_received"] is True
+    assert r.json()["error"] == "not_configured"
+    assert "RING_CLIENT_ID" in r.json()["detail"]
     r = client.post("/oauth/callback", data={"code": "SplwbOjb64"})
     assert r.status_code == 501
+
+
+def _oauth_client(tmp_path, mock_endpoint, *, with_store=True):
+    from ring_assistant.oauth import TokenExchanger, TokenStore
+    from ring_assistant.server import create_app
+
+    settings = Settings(webhook_secret=SECRET, db_path=str(tmp_path / "s.db"))
+    pipeline = build_pipeline(settings, db_path=str(tmp_path / "s.db"))
+    exchanger = TokenExchanger(
+        client_id="cid",
+        client_secret="client-secret-test-value",
+        transport=mock_endpoint,
+    )
+    store = TokenStore(tmp_path / "tokens.json") if with_store else None
+    return TestClient(create_app(pipeline, token_exchanger=exchanger, token_store=store))
+
+
+def test_token_exchange_route_mints_and_persists(tmp_path):
+    import json as _json
+
+    from test_oauth import MockTokenEndpoint
+
+    mock = MockTokenEndpoint()
+    client = _oauth_client(tmp_path, mock)
+    r = client.post("/oauth/callback", json={"code": "one-time-code"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "token_exchanged"
+    assert body["expires_in"] == 14400
+    assert body["persisted"] is True
+    # tokens are NEVER echoed in the response
+    assert "at-1" not in _json.dumps(body) and "rt-1" not in _json.dumps(body)
+    # the documented outbound exchange actually happened
+    form = mock.requests[0][2].decode("utf-8")
+    assert "grant_type=authorization_code" in form and "one-time-code" in form
+    # the minted bundle landed in the store (the RING_API_TOKEN source)
+    assert (tmp_path / "tokens.json").read_text(encoding="utf-8").count("at-1") == 1
+
+
+def test_token_exchange_route_form_body_and_errors(tmp_path):
+    from test_oauth import MockTokenEndpoint
+    from ring_assistant.oauth import OAuthError
+
+    mock = MockTokenEndpoint()
+    client = _oauth_client(tmp_path, mock)
+    # form-urlencoded inbound body is accepted too (docs don't pin the shape)
+    r = client.post(
+        "/oauth/callback",
+        content=b"code=form-code",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert r.status_code == 200
+    assert "form-code" in mock.requests[0][2].decode("utf-8")
+    # unparseable body -> 400
+    r = client.post(
+        "/oauth/callback",
+        content=b"{nope",
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
+    # endpoint failure -> 502 with the JSON:API detail, never the client secret
+    mock.status = 400
+    mock.payload = {"errors": [{"code": "INVALID_GRANT", "detail": "code expired"}]}
+    r = client.post("/oauth/callback", json={"code": "late"})
+    assert r.status_code == 502
+    assert "code expired" in r.json()["detail"]
+    assert "client-secret-test-value" not in r.json()["detail"]

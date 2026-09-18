@@ -219,9 +219,24 @@ below is built against the documented contracts and exercised offline.
    change, tested contract) and snapshots come from the documented
    download. Real snapshots are JPEG → the LLM path takes over from
    the pixel rules automatically (decoder refuses JPEG by design).
-4. Still to build (S2 residue → next): the OAuth token exchange that
-   MINTS `RING_API_TOKEN` from `RING_CLIENT_ID`/`RING_CLIENT_SECRET`,
-   and the account-link stub going real.
+4. ~~OAuth token exchange~~ **BUILT (S2, 2026-09-17)**: `oauth.py` +
+   the served `/oauth/callback` (the portal's Token Exchange URL) +
+   `uv run mint-token <code> | --refresh`. Ring POSTs a one-time
+   authorization code (60 s lifetime) backend-to-backend; the server
+   exchanges it at `https://oauth.ring.com/oauth/token`
+   (form-urlencoded confidential-client grant, NO PKCE — the docs use
+   the client secret, server-to-server only) and persists the bundle
+   (access ~4 h, refresh ~30 d) to `RING_TOKEN_STORE` (owner-only
+   JSON; gitignored). Tokens are never echoed or logged. 17 new
+   mock-transport tests (docs-pinned request shape, error paths,
+   store roundtrip, route behavior) — suite 340, zero sockets.
+   **Human gate (honest)**: minting a REAL token needs a Ring user
+   with US-located devices under an active Protection plan (guide §5)
+   to click Authorize — no such account exists here. A live probe
+   with a bogus code reached Ring's endpoint (HTTP 403 — edge/egress
+   rejection or no pending authorization; see docs/PORTAL-ENDPOINTS.md).
+   Remaining S2 residue: the account-link sign-in + HMAC nonce match
+   (same human gate — needs the /v1/users/me account id first).
 
 Honest caveats live in `VALIDATION.md` (items 9–11): pixel-rule
 thresholds are calibrated to the synthetic scenes, the Events API
@@ -314,11 +329,13 @@ never blocks the buildable part.
   not observed traffic; real-world variance is unmeasured until the
   registration gate passes and a live window exists.
 - The four portal endpoints (webhook/token-exchange/account-link/
-  homepage) need a publicly reachable HTTPS host; the guide covers
-  tunnels. The three non-webhook endpoints are honest stubs until S2.
-- `RING_CLIENT_ID` / `RING_CLIENT_SECRET` are declared in
-  `.env.example` but consumed by nothing yet — S2 (OAuth token
-  exchange, account linking) inputs.
+  homepage) are served over a public HTTPS tunnel (localhost.run;
+  docs/PORTAL-ENDPOINTS.md): webhook live, token exchange real (S2
+  machine, gated on a Ring-minted code), homepage live, account-link
+  an honest gate page (guide §5 US-device constraint).
+- `RING_CLIENT_ID` / `RING_CLIENT_SECRET` feed the S2 token exchange
+  (`oauth.py`, `/oauth/callback`, `uv run mint-token`); a real mint
+  still needs the guide-§5 human gate (Ring login with US devices).
 - Sync handler vs Ring's <5 s ack budget is unchanged (VALIDATION.md
   caveat 4): fine with the rules stub, risky with a remote LLM.
 
@@ -331,12 +348,14 @@ never blocks the buildable part.
 - [ ] S4 publication gate: explicit owner approval before the repo or
       the video's repo URL goes public (pushing `main` belongs to this
       item — no push yet)
-- [ ] S1 gate: human runs `docs/REGISTRATION-GUIDE.md` (was ≤ 19-Sep;
-      still open — the submission stands on the rules-sanctioned
-      simulator path with or without it)
-- [ ] S2 residue: OAuth token exchange + account linking (needs S1
-      client credentials; endpoint stubs become real; mints
-      RING_API_TOKEN for the live snapshot source)
+- [x] S1 gate: PASSED 2026-09-17 — owner completed the portal
+      registration; credentials live in `.env` (verified end-to-end:
+      signed webhook accepted through the public tunnel URL,
+      docs/PORTAL-ENDPOINTS.md)
+- [ ] S2 residue: account-link sign-in + HMAC nonce match on top of the
+      now-built token exchange (both behind the guide-§5 human gate:
+      a Ring user with US devices authorizes → code arrives → bundle
+      mints RING_API_TOKEN for the live snapshot source)
 - [ ] S3 live legs: `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` and/or
       `RING_LLM_*` in `.env` (human, 2 minutes each — see README §Value
       layer); real watermarked-JPEG snapshots through the LLM adapter

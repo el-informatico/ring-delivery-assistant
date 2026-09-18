@@ -25,3 +25,7 @@ build/
 # Star-metric runs: latencies belong to the machine that measured them
 # (regenerate with: uv run star-metric)
 .star/
+
+# OAuth token bundle minted by the S2 exchange — secrets, never commit
+ring-tokens.json
+*.tokens.json

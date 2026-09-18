@@ -111,9 +111,12 @@ The portal asks for four HTTPS endpoints
 | Endpoint | Purpose | What to enter now |
 |---|---|---|
 | **Webhook URL** | Ring POSTs signed events here | `https://<your-tunnel>/webhooks/ring` — must be publicly reachable HTTPS |
-| **Token Exchange URL** | Receives OAuth codes | stub URL on the same tunnel (S2 work) |
-| **Account Link URL** | Your login page for linking | stub URL on the same tunnel (S2 work) |
-| **App Homepage URL** | Post-linking config page | any HTTPS page (even the tunnel root) |
+| **Token Exchange URL** | Receives OAuth codes | `https://<your-tunnel>/oauth/callback` — the real exchange machine (S2 built; see §5b) |
+| **Account Link URL** | Your login page for linking | `https://<your-tunnel>/account-link` — honest gate page until a Ring login exists |
+| **App Homepage URL** | Post-linking config page | `https://<your-tunnel>/` (the served landing page) |
+
+The live URLs used for this app's staging tab (plus the tunnel
+re-establish commands) live in `docs/PORTAL-ENDPOINTS.md`.
 
 Practical notes:
 
@@ -146,6 +149,44 @@ https://amazonappdev2026.devpost.com/rules). Registration + credentials
 are still worth it: they unlock the portal, the real signing key, and
 any future live window.
 
+## 5b. The token exchange is BUILT — what a real mint needs from a human
+
+The S2 machine exists and runs: the served `/oauth/callback` (the portal's
+Token Exchange URL) takes the authorization code Ring POSTs there
+(backend-to-backend, one-time code, 60 s lifetime), exchanges it at
+`https://oauth.ring.com/oauth/token` (documented confidential-client grant:
+`grant_type=authorization_code` + `client_id` + `code` + `client_secret` in
+a form body — **no PKCE**, the docs authenticate with the client secret,
+server-to-server only), and persists the token bundle (access ~4 h, refresh
+~30 d) to `RING_TOKEN_STORE` (set it in `.env`, e.g. `RING_TOKEN_STORE=
+ring-tokens.json` — gitignored, owner-only permissions). `uv run
+mint-token <code>` and `uv run mint-token --refresh` run the same machine
+by hand. All of it is pinned by mock-transport tests (`tests/test_oauth.py`,
+`tests/test_server.py`); tokens are never echoed, logged, or committed.
+
+What NO code can do for us — the honest gate: a real `access_token` only
+exists after a Ring USER authorizes the app, and per §5 a staging login
+needs a Ring account with US-located devices under an active Protection
+plan. If such an account ever becomes available, minting is exactly:
+
+1. Server + tunnel up (`docs/PORTAL-ENDPOINTS.md`), `.env` carrying
+   `RING_CLIENT_ID`/`RING_CLIENT_SECRET`/`RING_TOKEN_STORE`.
+2. The Ring user opens the staging app in the Ring AppStore flow and
+   clicks **Authorize** (scopes → device selection → Confirm).
+3. Ring POSTs the one-time code to the Token Exchange URL; the server
+   answers `200 {"status": "token_exchanged", …}` and the bundle lands in
+   the store file — nothing to click on our side.
+4. Copy the `access_token` from the store file into `.env` as
+   `RING_API_TOKEN` (never chat, never commit); snapshots then go live
+   (`ApiSnapshotSource`). Refresh before ~4 h with
+   `uv run mint-token --refresh` and re-paste.
+
+Until then `RING_API_TOKEN` stays empty and the submission stands on the
+rules-sanctioned documented-contract replay (§5). One observed datum from
+2026-09-17: a deliberately bogus code POSTed through the public tunnel
+reached `oauth.ring.com` and drew HTTP 403 (edge/egress rejection or no
+pending authorization) — recorded honestly in `docs/PORTAL-ENDPOINTS.md`.
+
 ## 6. Paste into `.env` — never chat, never commit
 
 Copy `.env.example` → `.env` (gitignored) and fill:
@@ -154,8 +195,9 @@ Copy `.env.example` → `.env` (gitignored) and fill:
 RING_WEBHOOK_SECRET=<HMAC Signature Key from the credentials screen>
 RING_SIGNATURE_HEADER=x-signature     # Ring's live header name (docs:
                                       # https://developer.amazon.com/docs/ring/api-documentation.html#webhook-authentication--verification)
-RING_CLIENT_ID=<Client ID>            # S2 OAuth work
-RING_CLIENT_SECRET=<Client Secret>    # S2 OAuth work
+RING_CLIENT_ID=<Client ID>            # feeds /oauth/callback + mint-token (§5b)
+RING_CLIENT_SECRET=<Client Secret>    # feeds /oauth/callback + mint-token (§5b)
+RING_TOKEN_STORE=ring-tokens.json     # where a successful exchange persists
 ```
 
 The repo never needs the values in chat or in git — `.env` is the only

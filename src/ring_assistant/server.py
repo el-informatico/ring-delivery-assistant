@@ -24,7 +24,9 @@ timeout. A queue in front of the pipeline is the production answer
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -32,6 +34,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from .capture import CAPTURE_FILE_NAME, WebhookRecorder
 from .ingest import WebhookError
 from .llm import build_classifier
+from .oauth import OAuthError, TokenExchanger, TokenStore
 from .replay import Pipeline
 from .routing import Router
 from .schema import SchemaError
@@ -61,7 +64,12 @@ def build_pipeline(settings: Settings, db_path: str | None = None) -> Pipeline:
 
 
 def create_app(
-    pipeline: Pipeline, *, live_wire: bool = False, recorder: WebhookRecorder | None = None
+    pipeline: Pipeline,
+    *,
+    live_wire: bool = False,
+    recorder: WebhookRecorder | None = None,
+    token_exchanger: TokenExchanger | None = None,
+    token_store: TokenStore | None = None,
 ) -> FastAPI:
     """``live_wire=True`` speaks Ring's documented webhook v1.1 contract
     (JSON:API envelope + ``X-Signature``) — the mode to point Ring's
@@ -73,6 +81,12 @@ def create_app(
     appends every delivery — accepted, ignored, or rejected — to a JSONL
     capture that ``replay-webhooks`` can re-run offline. Recording
     failures warn on stderr and never fail the delivery.
+
+    ``token_exchanger`` (built from ``RING_CLIENT_ID``/``RING_CLIENT_SECRET``)
+    turns the Token Exchange URL from a 501 stub into the real S2
+    machine: the posted authorization code goes to ``oauth.ring.com``
+    and the minted bundle persists via ``token_store`` when configured
+    (``RING_TOKEN_STORE``). Tokens are never echoed in responses.
     """
     app = FastAPI(title="ring-delivery-assistant", version="0.1.0")
 
@@ -92,7 +106,7 @@ def create_app(
 <title>ring-delivery-assistant</title></head><body style="font-family:system-ui">
 <h1>ring-delivery-assistant</h1>
 <p>Staging endpoints: <code>POST /webhooks/ring</code> (live wire, HMAC-signed),
-<code>/oauth/callback</code> (S2), <code>/account-link</code> (S2).</p>
+<code>/oauth/callback</code> (token exchange), <code>/account-link</code> (pending).</p>
 <p>Health: <code>/healthz</code></p></body></html>"""
 
     @app.get("/account-link", response_class=HTMLResponse)
@@ -110,16 +124,67 @@ path.</p></body></html>"""
 
     @app.api_route("/oauth/callback", methods=["GET", "POST"])
     async def oauth_callback(request: Request) -> JSONResponse:
-        # S2 token exchange target: Ring redirects here with ?code=. Stub
-        # until the token-exchange machine (S2) is wired to this route.
+        # Token Exchange URL (portal staging tab). Ring's backend POSTs a
+        # one-time authorization code (60 s lifetime) here backend-to-
+        # backend; the documented inbound body shape is not pinned in the
+        # API reference, so JSON {"code": ...} and form code=... are both
+        # accepted, plus a GET ?code= for portal smoke checks. Tokens are
+        # never echoed — only non-secret mint metadata.
         code = request.query_params.get("code")
+        if request.method == "POST":
+            body = await request.body()
+            if body:
+                content_type = request.headers.get("content-type", "")
+                try:
+                    if content_type.startswith("application/json"):
+                        payload = json.loads(body.decode("utf-8"))
+                        code = payload.get("code") if isinstance(payload, dict) else None
+                    else:
+                        values = parse_qs(body.decode("utf-8")).get("code", [])
+                        code = values[0] if values else None
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": "bad_request", "detail": "unparseable body"},
+                    )
+        if not code:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "bad_request",
+                    "detail": "no authorization code: POST JSON {code} or form "
+                    "code=..., or GET ?code= (see docs/REGISTRATION-GUIDE.md)",
+                },
+            )
+        if token_exchanger is None:
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": "not_configured",
+                    "detail": "set RING_CLIENT_ID and RING_CLIENT_SECRET in .env "
+                    "to enable the token exchange",
+                },
+            )
+        try:
+            # inline on purpose: the code dies 60 s after Ring mints it
+            bundle = token_exchanger.exchange_code(code)
+        except OAuthError as exc:
+            return JSONResponse(
+                status_code=502,
+                content={"error": "token_exchange_failed", "detail": str(exc)},
+            )
+        persisted = False
+        if token_store is not None:
+            token_store.save(bundle)
+            persisted = True
         return JSONResponse(
-            status_code=501,
-            content={
-                "error": "not_implemented",
-                "detail": "token exchange pending (S2); see docs/REGISTRATION-GUIDE.md",
-                "code_received": bool(code),
-            },
+            {
+                "status": "token_exchanged",
+                "token_type": bundle.token_type,
+                "expires_in": bundle.expires_in,
+                "expires_at": bundle.expires_at,
+                "persisted": persisted,
+            }
         )
 
     def _record(body: bytes, request: Request, outcome: str, status: int, note: str = "") -> None:
@@ -190,7 +255,25 @@ def build_default_app() -> FastAPI:
     )
     # The served app speaks the live v1.1 wire contract; set
     # RING_SIGNATURE_HEADER=x-signature for Ring traffic (see .env.example)
-    return create_app(build_pipeline(settings), live_wire=True, recorder=recorder)
+    # Token exchange goes live the moment both portal credentials exist;
+    # until then the Token Exchange URL answers an honest 501.
+    exchanger = (
+        TokenExchanger(
+            client_id=settings.client_id,
+            client_secret=settings.client_secret,
+            timeout_s=settings.api_timeout_s,
+        )
+        if settings.client_id and settings.client_secret
+        else None
+    )
+    store = TokenStore(Path(settings.token_store_path)) if settings.token_store_path else None
+    return create_app(
+        build_pipeline(settings),
+        live_wire=True,
+        recorder=recorder,
+        token_exchanger=exchanger,
+        token_store=store,
+    )
 
 
 def __getattr__(name: str):
