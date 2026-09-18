@@ -40,10 +40,25 @@ scrub. Verify in the browser: the repo page shows a **Private** badge.
 ## Step 1 — Turso account + database (~5 min)
 
 1. <https://turso.tech> → **Login** → **Sign in with GitHub** (same account).
-2. Install the CLI (Linux/WSL):
+2. Install the CLI (Linux/WSL). NOTE 2026-09-18: `get.tur.so` installer is
+   DEAD (404). Install from the official GitHub releases instead:
+
    ```bash
-   curl -sSfL https://get.tur.so/cli | bash
-   turso auth login   # opens the browser; you are already signed in
+   curl -sL -o /tmp/turso.tar.gz \
+     https://github.com/tursodatabase/turso-cli/releases/latest/download/turso-cli_Linux_x86_64.tar.gz
+   tar xzf /tmp/turso.tar.gz -C /tmp && mv /tmp/turso ~/.local/bin/
+   ```
+
+   Login (WSL has no xdg-open; `--headless` exits immediately without
+   waiting, and the plain flow dies with "failed to open auth URL" — the
+   fix is an xdg-open stub so the interactive flow keeps its localhost
+   listener alive, then open the printed api.turso.tech URL by hand and
+   use "Sign in with GitHub"):
+
+   ```bash
+   printf '#!/bin/sh\nexit 0\n' > /tmp/xdg-open && chmod +x /tmp/xdg-open
+   export PATH="/tmp:$HOME/.local/bin:$PATH"
+   turso auth login   # prints https://api.turso.tech?port=<port>&... — open it manually
    ```
 3. Create the database and mint credentials:
    ```bash

@@ -1,23 +1,30 @@
 # Portal endpoints (staging tab) — paste-ready URLs
 
-Permanent replacement in flight: `docs/DEPLOY-RENDER.md` (Render + Turso)
-gives stable `*.onrender.com` URLs that never need re-pasting — this file's
-tunnel table remains current until that deploy is verified.
+**CURRENT (2026-09-18): permanent Render URLs below — migration complete,
+verified end-to-end.** The old `*.lhr.life` tunnel table at the bottom is
+kept for history only; those bases are dead.
 
-Verified live on 2026-09-17 through the tunnel below (re-verified twice as
-the tunnel reconnected — the URL changes each reconnect; see below). Portal
-reference:
+Portal reference:
 <https://developer.amazon.com/docs/ring/api-documentation.html#13-configure-endpoints>.
 
 ## Paste these into the Ring Developer Portal → Staging tab
 
-Current base: `99d36bed0c2cc7.lhr.life` (2026-09-17 late evening). Earlier
-bases `aaab70143ca90d.lhr.life` and `33f48535360323.lhr.life` are **dead** —
-if the portal still shows one of those, re-paste all four rows below.
+Base: `https://ring-delivery-assistant.onrender.com` (Render free tier,
+kept warm by UptimeRobot 5-min pings on `/healthz`).
 
 | Endpoint field | URL | Paste note |
 |---|---|---|
-| **Webhook URL** | `https://99d36bed0c2cc7.lhr.life/webhooks/ring` | Live v1.1 wire contract; HMAC-verified (bad signature → 401) |
+| **Webhook URL** | `https://ring-delivery-assistant.onrender.com/webhooks/ring` | Live v1.1 wire contract; HMAC-verified against production 2026-09-18 (signed motion event → 200 accepted, bad signature → 401) |
+| **Token Exchange URL** | `https://ring-delivery-assistant.onrender.com/oauth/callback` | Real exchange machine (S2); POST without code → 400 as designed (verified 2026-09-18) |
+| **Account Link URL** | `https://ring-delivery-assistant.onrender.com/account-link` | Honest gate page (US-device constraint, guide §5); HTTP 200 verified |
+| **App Homepage URL** | `https://ring-delivery-assistant.onrender.com/` | Landing page listing the endpoints; HTTP 200 verified |
+
+Portal acceptance: "Account linking settings saved successfully"
+(2026-09-18). Persistence verified: signed webhook event
+`ava1.ring.device.door001_motion_1786715596787` landed in Turso
+(`events` table) within seconds.
+
+## History — tunnel era (dead)
 | **Token Exchange URL** | `https://99d36bed0c2cc7.lhr.life/oauth/callback` | Real exchange machine (S2): posted code goes to oauth.ring.com; needs a code only Ring can mint |
 | **Account Link URL** | `https://99d36bed0c2cc7.lhr.life/account-link` | Honest gate page (US-device constraint, guide §5) |
 | **App Homepage URL** | `https://99d36bed0c2cc7.lhr.life/` | Landing page listing the endpoints |
