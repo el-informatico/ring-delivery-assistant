@@ -30,7 +30,7 @@ first. From `the repo root`:
 ```bash
 gh repo create ring-delivery-assistant --private --source . --push
 #   (or, without gh:)
-git remote add origin git@github.com:<your-github-username>/ring-delivery-assistant.git
+git remote add origin git@github.com:el-informatico/ring-delivery-assistant.git
 git push -u origin main
 ```
 
