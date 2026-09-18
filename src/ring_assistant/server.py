@@ -27,7 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .capture import CAPTURE_FILE_NAME, WebhookRecorder
 from .ingest import WebhookError
@@ -79,6 +79,48 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> dict:
         return {"ok": True}
+
+    # ---- portal endpoint stubs (staging tab; full machine is S2) ---------
+    # The four URLs pasted into the Ring Developer Portal must answer over
+    # public HTTPS. Only /webhooks/ring does real work today; these three are
+    # honest stubs: a landing page, the account-link gate, and a 501 for the
+    # OAuth redirect until the S2 token exchange lands.
+
+    @app.get("/", response_class=HTMLResponse)
+    def homepage() -> str:
+        return """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>ring-delivery-assistant</title></head><body style="font-family:system-ui">
+<h1>ring-delivery-assistant</h1>
+<p>Staging endpoints: <code>POST /webhooks/ring</code> (live wire, HMAC-signed),
+<code>/oauth/callback</code> (S2), <code>/account-link</code> (S2).</p>
+<p>Health: <code>/healthz</code></p></body></html>"""
+
+    @app.get("/account-link", response_class=HTMLResponse)
+    def account_link() -> str:
+        # Honest gate: linking needs a Ring login, and Ring staging test users
+        # require US-located devices under an active Protection plan — out of
+        # scope for this build (docs/REGISTRATION-GUIDE.md §5).
+        return """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Account link — pending</title></head><body style="font-family:system-ui">
+<h1>Account linking not enabled yet</h1>
+<p>Ring account linking requires a Ring login, and staging logins need a
+Ring account with US-located devices under an active Protection plan
+(docs/REGISTRATION-GUIDE.md &sect;5). See docs/SUBMISSION.md for the demo
+path.</p></body></html>"""
+
+    @app.api_route("/oauth/callback", methods=["GET", "POST"])
+    async def oauth_callback(request: Request) -> JSONResponse:
+        # S2 token exchange target: Ring redirects here with ?code=. Stub
+        # until the token-exchange machine (S2) is wired to this route.
+        code = request.query_params.get("code")
+        return JSONResponse(
+            status_code=501,
+            content={
+                "error": "not_implemented",
+                "detail": "token exchange pending (S2); see docs/REGISTRATION-GUIDE.md",
+                "code_received": bool(code),
+            },
+        )
 
     def _record(body: bytes, request: Request, outcome: str, status: int, note: str = "") -> None:
         if recorder is None:

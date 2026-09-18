@@ -114,3 +114,29 @@ def test_pipeline_uses_rules_stub_when_llm_unconfigured(tmp_path):
     assert isinstance(pipeline.classifier, RuleBasedClassifier)
     assert isinstance(pipeline.store, StateStore)
     assert isinstance(pipeline.router, Router)
+
+
+def test_portal_endpoint_stubs(client):
+    """The three non-webhook portal URLs answer honestly (staging tab)."""
+    # Homepage: any HTTPS page is valid per the guide's table.
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "ring-delivery-assistant" in r.text
+    assert "Staging endpoints" in r.text
+
+    # Account link: honest gate page, links the constraint doc.
+    r = client.get("/account-link")
+    assert r.status_code == 200
+    assert "Account linking" in r.text
+    assert "US-located devices" in r.text
+
+    # Token exchange: 501 pending, and it must NOT swallow the code silently.
+    r = client.get("/oauth/callback")
+    assert r.status_code == 501
+    assert r.json()["error"] == "not_implemented"
+    assert r.json()["code_received"] is False
+    r = client.get("/oauth/callback?code=SplwbOjb64&state=xyz")
+    assert r.status_code == 501
+    assert r.json()["code_received"] is True
+    r = client.post("/oauth/callback", data={"code": "SplwbOjb64"})
+    assert r.status_code == 501
