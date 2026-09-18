@@ -225,7 +225,7 @@ response parsing all still execute, offline and deterministically.
 the scripted day (N = 11 events, all through the live v1.1 edge) with
 `perf_counter` timings per stage and writes `.star/star-metric.md`
 (gitignored — latencies belong to the machine that measured them).
-One measured run (WSL2, Python 3.13, offline legs):
+One measured offline run (WSL2, Python 3.13, no sockets):
 
 | id | intent | action | edge ms | classify ms | state ms | route ms | deliver ms | total ms |
 |---|---|---|---|---|---|---|---|---|
@@ -252,6 +252,35 @@ against the recording transport (no POST; a live chat adds the Bot API
 RTT). The two suppressed deposits show the value layer earning its
 keep: the redelivery (s3-004) dedupes in 2.8 ms total, and the
 superseded straggler (s3-007) costs no notification at all.
+
+**The same day, live delivery (2026-09-18).** With Telegram credentials
+in `.env`, `uv run star-metric` POSTs to the real Bot API — 7 messages
+reached a phone. One measured live run (WSL2, Python 3.13;
+classification still the mock vision model, no LLM endpoint configured):
+
+| id | intent | action | edge ms | classify ms | state ms | route ms | deliver ms | total ms |
+|---|---|---|---|---|---|---|---|---|
+| s3-001 | package_deposited ★ | notify | 0.090 | 2.534 | 3.417 | 0.098 | 704.192 | 710.330 |
+| s3-002 | vehicle_at_door ★ | notify | 0.094 | 2.404 | 3.789 | 0.163 | 867.455 | 873.905 |
+| s3-003 | person_at_door ★ | notify | 0.061 | 2.234 | 4.721 | 0.191 | 694.273 | 701.481 |
+| s3-004 | person_at_door | suppress | 0.041 | 3.748 | 0.089 | 0.039 | 0.000 | 3.917 |
+| s3-005 | package_deposited ★ | notify | 0.032 | 2.315 | 4.092 | 0.080 | 690.600 | 697.118 |
+| s3-006 | package_picked_up ★ | notify | 0.060 | 2.553 | 5.339 | 0.177 | 699.047 | 707.176 |
+| s3-007 | package_deposited | suppress | 0.050 | 2.284 | 4.148 | 0.085 | 0.001 | 6.568 |
+| s3-008 | motion_noise | suppress | 0.051 | 2.275 | 20.022 | 0.103 | 0.001 | 22.451 |
+| s3-009 | motion_noise | suppress | 0.055 | 2.274 | 4.297 | 0.098 | 0.001 | 6.725 |
+| s3-010 | motion_noise ★ | notify | 0.055 | 2.466 | 4.237 | 0.096 | 703.736 | 710.590 |
+| s3-011 | person_at_door ★ | escalate | 0.040 | 2.421 | 4.673 | 0.420 | 717.107 | 724.660 |
+
+**N = 11 events, 7 routed notifications, 7 live Telegram `sendMessage`
+deliveries; ding → routed notification: min 3.917 ms · median
+701.481 ms · mean 469.538 ms · p90 724.660 ms. Classification stage
+alone: median 2.404 ms.** The offline table above stays deliberately:
+the two runs differ almost entirely in the deliver leg, where the Bot
+API round trip (~0.7 s median) now dominates — the pipeline's own
+stages (edge → route) sit in the same millisecond band either way, and
+the suppressed rows (s3-004, s3-007–s3-009) still cost no delivery at
+all.
 
 ## License
 
