@@ -60,6 +60,12 @@ scrub. Verify in the browser: the repo page shows a **Private** badge.
    export PATH="/tmp:$HOME/.local/bin:$PATH"
    turso auth login   # prints https://api.turso.tech?port=<port>&... — open it manually
    ```
+
+   NOTE 2026-09-18: the printed auth URL is short-lived — the flow's
+   localhost listener behind it is gone after roughly 20 minutes, so a
+   browser tab opened late lands on a dead localhost port and auth never
+   completes. Click through promptly after `turso auth login` prints the
+   URL; if it expired, start the login again.
 3. Create the database and mint credentials:
    ```bash
    turso db create ring-staging
@@ -75,6 +81,11 @@ orders of magnitude above webhook traffic.
 ## Step 2 — Render web service (~8 min)
 
 1. <https://render.com> → **Get Started** → **Sign in with GitHub**.
+   Browser note (2026-09-18): with Brave's shields at default
+   (third-party cookies blocked), the render↔github OAuth handshake
+   loops forever on "connect account" — lower shields for
+   `render.com` + `github.com`, or use another Chromium browser, and
+   the handshake completes on the first try.
 2. Dashboard → **New +** → **Web Service**.
 3. Connect the `ring-delivery-assistant` (private) repo — authorize Render's
    app if asked (private repos need the extra consent click).
