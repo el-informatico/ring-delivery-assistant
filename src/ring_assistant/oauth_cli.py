@@ -6,12 +6,13 @@ same machine (docs/REGISTRATION-GUIDE.md §6):
 
     mint-token <code>     exchange a fresh authorization code (60 s
                           lifetime — paste it the moment you have it)
-    mint-token --refresh  rotate the bundle stored via RING_TOKEN_STORE
-                          (access tokens live ~4 h)
+    mint-token --refresh  rotate the stored bundle (access tokens live
+                          ~4 h)
 
-Both persist to RING_TOKEN_STORE when set; the printed summary carries
-NO token material — copy the access token from the store file into
-``.env`` as ``RING_API_TOKEN`` (never chat, never commit).
+The bundle persists to Turso when RING_TURSO_URL + RING_TURSO_TOKEN are
+set (the deployed store), else to the RING_TOKEN_STORE file. The printed
+summary carries NO token material — copy the access token from the store
+into ``.env`` as ``RING_API_TOKEN`` (never chat, never commit).
 """
 
 from __future__ import annotations
@@ -43,10 +44,31 @@ def main(argv: list[str] | None = None) -> int:
     client_id = os.environ.get("RING_CLIENT_ID", "")
     client_secret = os.environ.get("RING_CLIENT_SECRET", "")
     store_path = os.environ.get("RING_TOKEN_STORE", "")
+    turso_url = os.environ.get("RING_TURSO_URL", "")
+    turso_token = os.environ.get("RING_TURSO_TOKEN", "")
 
     if not args.code and not args.refresh:
         parser.error("pass an authorization code or --refresh")
-    if not store_path:
+    # Deployed storage: Turso wins when BOTH coordinates exist (the bundle
+    # must survive the deploy's ephemeral disk); half-set is an error;
+    # neither set falls back to the RING_TOKEN_STORE file.
+    store = None
+    store_label = ""
+    if turso_url or turso_token:
+        if not (turso_url and turso_token):
+            print(
+                "error: RING_TURSO_URL and RING_TURSO_TOKEN must be set together",
+                file=sys.stderr,
+            )
+            return 1
+        from .turso import TursoTokenStore, connect_turso
+
+        store = TursoTokenStore(connect_turso(turso_url, turso_token))
+        store_label = "Turso (tokens table)"
+    elif store_path:
+        store = TokenStore(Path(store_path))
+        store_label = store_path
+    if store is None:
         print(
             "RING_TOKEN_STORE is not set; the bundle will NOT persist. "
             "Set it in .env so the minted token survives this command.",
@@ -60,11 +82,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.refresh:
-            store = TokenStore(Path(store_path)) if store_path else None
-            bundle = store.load() if store else None
+            bundle = store.load() if store is not None else None
             if bundle is None or not bundle.refresh_token:
                 print(
-                    "error: no bundle with a refresh token in RING_TOKEN_STORE; "
+                    "error: no bundle with a refresh token in the token store; "
                     "exchange a code first",
                     file=sys.stderr,
                 )
@@ -76,15 +97,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    if store_path:
-        TokenStore(Path(store_path)).save(bundle)
+    if store is not None:
+        store.save(bundle)
     expires_at = datetime.fromtimestamp(bundle.expires_at, tz=timezone.utc)
     print(
         f"token exchanged: {bundle.token_type}, expires_in={bundle.expires_in}s "
         f"(at {expires_at.isoformat()})"
     )
-    if store_path:
-        print(f"persisted: {store_path} (access token ready to become RING_API_TOKEN)")
+    if store is not None:
+        print(f"persisted: {store_label} (access token ready to become RING_API_TOKEN)")
     return 0
 
 

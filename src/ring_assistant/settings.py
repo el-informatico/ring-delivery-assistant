@@ -120,6 +120,12 @@ class Settings:
     client_id: str = ""  # RING_CLIENT_ID (portal credential; .env only)
     client_secret: str = ""  # RING_CLIENT_SECRET (portal credential; .env only)
     token_store_path: str = ""  # RING_TOKEN_STORE (bundle JSON; gitignore it)
+    # Deployed storage (Render + Turso, docs/DEPLOY-RENDER.md): BOTH set ->
+    # state DB and token store live in Turso (libsql), overriding the file
+    # paths above; both unset -> file mode for local dev. Half-set fails
+    # closed at startup.
+    turso_url: str = ""  # RING_TURSO_URL (libsql://...turso.io; .env/Render only)
+    turso_token: str = ""  # RING_TURSO_TOKEN (DB token; .env/Render only)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -164,4 +170,6 @@ class Settings:
             client_id=source.get("RING_CLIENT_ID", ""),
             client_secret=source.get("RING_CLIENT_SECRET", ""),
             token_store_path=source.get("RING_TOKEN_STORE", ""),
+            turso_url=source.get("RING_TURSO_URL", ""),
+            turso_token=source.get("RING_TURSO_TOKEN", ""),
         )

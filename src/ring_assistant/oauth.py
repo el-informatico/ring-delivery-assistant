@@ -189,6 +189,37 @@ def _bundle_from_response(response: HttpResponse, *, now: float | None) -> Token
     )
 
 
+def bundle_to_document(bundle: TokenBundle) -> dict:
+    """The JSON-serializable form of a bundle (shared by every store
+    backend — file and Turso persist the same document)."""
+    return {
+        "access_token": bundle.access_token,
+        "refresh_token": bundle.refresh_token,
+        "scope": bundle.scope,
+        "expires_in": bundle.expires_in,
+        "token_type": bundle.token_type,
+        "obtained_at": bundle.obtained_at,
+        "expires_at": bundle.expires_at,
+    }
+
+
+def bundle_from_document(payload: object) -> TokenBundle | None:
+    """Parse a stored document; None when absent/corrupt (never raises)."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("access_token"), str):
+        return None
+    try:
+        return TokenBundle(
+            access_token=payload["access_token"],
+            refresh_token=str(payload.get("refresh_token", "") or ""),
+            scope=str(payload.get("scope", "") or ""),
+            expires_in=int(payload.get("expires_in", DOCUMENTED_EXPIRES_IN)),
+            token_type=str(payload.get("token_type", "") or DOCUMENTED_TOKEN_TYPE),
+            obtained_at=float(payload["obtained_at"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 @dataclass
 class TokenStore:
     """Persist the newest bundle as JSON with owner-only permissions.
@@ -204,15 +235,7 @@ class TokenStore:
 
     def save(self, bundle: TokenBundle) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        document = {
-            "access_token": bundle.access_token,
-            "refresh_token": bundle.refresh_token,
-            "scope": bundle.scope,
-            "expires_in": bundle.expires_in,
-            "token_type": bundle.token_type,
-            "obtained_at": bundle.obtained_at,
-            "expires_at": bundle.expires_at,
-        }
+        document = bundle_to_document(bundle)
         # write-then-rename so a crash never leaves a half-written store
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
@@ -225,16 +248,4 @@ class TokenStore:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
-        if not isinstance(payload, dict) or not isinstance(payload.get("access_token"), str):
-            return None
-        try:
-            return TokenBundle(
-                access_token=payload["access_token"],
-                refresh_token=str(payload.get("refresh_token", "") or ""),
-                scope=str(payload.get("scope", "") or ""),
-                expires_in=int(payload.get("expires_in", DOCUMENTED_EXPIRES_IN)),
-                token_type=str(payload.get("token_type", "") or DOCUMENTED_TOKEN_TYPE),
-                obtained_at=float(payload["obtained_at"]),
-            )
-        except (KeyError, TypeError, ValueError):
-            return None
+        return bundle_from_document(payload)

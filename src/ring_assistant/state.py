@@ -27,14 +27,17 @@ Transitions are reported to the caller (routing conditions on them):
   NO_TRACK_CHANGE     event does not touch package tracking
   DUPLICATE           event_id already applied; nothing changed
 
-SQLite via stdlib sqlite3. Schema is migration-free for this skeleton
-(``CREATE TABLE IF NOT EXISTS``); tracks rows are rebuilt wholesale.
+SQLite via stdlib sqlite3 — or any SQLite-dialect DBAPI backend injected
+as ``connection`` (the Turso/libsql deploy path, see :mod:`ring_assistant.turso`).
+Schema is migration-free for this skeleton (``CREATE TABLE IF NOT EXISTS``);
+tracks rows are rebuilt wholesale.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
@@ -163,16 +166,39 @@ def _rebuild(device_id: str, events: list[_LoggedEvent]) -> list[Track]:
 
 
 class StateStore:
-    """SQLite-backed package-track state, one instance per database file."""
+    """SQLite-backed package-track state, one instance per database.
 
-    def __init__(self, db_path: str | Path):
-        self.db_path = Path(db_path)
-        # check_same_thread=False: the ASGI adapter runs the handler on a
-        # worker thread while the store was built on the main thread.
-        # Single-writer skeleton — no concurrent access is attempted.
-        self._db = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._db.executescript(_SCHEMA)
-        self._db.commit()
+    ``db_path`` keeps the stdlib sqlite3 file store (local dev);
+    ``connection`` injects any backend speaking the same DBAPI subset
+    (``execute(sql, params) -> cursor, commit, close``) — the Turso/
+    libsql deploy path. Exactly one of the two.
+    """
+
+    def __init__(self, db_path: str | Path | None = None, *, connection=None):
+        if (db_path is None) == (connection is None):
+            raise ValueError("StateStore needs exactly one of db_path or connection")
+        self.db_path = Path(db_path) if db_path is not None else None
+        if connection is not None:
+            self._db = connection
+        else:
+            # check_same_thread=False: the ASGI adapter runs the handler on
+            # a worker thread while the store was built on the main thread.
+            # Single-writer skeleton — no concurrent access is attempted.
+            self._db = sqlite3.connect(self.db_path, check_same_thread=False)
+        # Serializes multi-statement applies across the ASGI worker
+        # threads: injected backends are not documented thread-safe the
+        # way sqlite3 is. RLock — helpers re-enter under apply().
+        self._lock = threading.RLock()
+        self._ensure_schema()
+
+    def _ensure_schema(self) -> None:
+        with self._lock:
+            # one statement at a time (not executescript) so the same code
+            # runs on every DBAPI-shaped backend
+            for statement in _SCHEMA.split(";"):
+                if statement.strip():
+                    self._db.execute(statement, [])
+            self._db.commit()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -188,6 +214,10 @@ class StateStore:
     # -- reads --------------------------------------------------------------
 
     def tracks(self, device_id: str) -> list[Track]:
+        with self._lock:
+            return self._tracks_locked(device_id)
+
+    def _tracks_locked(self, device_id: str) -> list[Track]:
         rows = self._db.execute(
             "SELECT deposited_at, picked_up_at, deposits, deposit_event_ids,"
             " pickup_event_id, out_of_order FROM tracks WHERE device_id = ?"
@@ -219,22 +249,27 @@ class StateStore:
         before: datetime,
     ) -> int:
         """Events with ``intent`` in ``(before - window, before]``."""
-        row = self._db.execute(
-            "SELECT COUNT(*) FROM events WHERE device_id = ? AND intent = ?"
-            " AND occurred_at > ? AND occurred_at <= ?",
-            (
-                device_id,
-                intent.value,
-                (before - window).isoformat(),
-                before.isoformat(),
-            ),
-        ).fetchone()
-        return row[0]
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COUNT(*) FROM events WHERE device_id = ? AND intent = ?"
+                " AND occurred_at > ? AND occurred_at <= ?",
+                (
+                    device_id,
+                    intent.value,
+                    (before - window).isoformat(),
+                    before.isoformat(),
+                ),
+            ).fetchone()
+            return row[0]
 
     # -- writes -------------------------------------------------------------
 
     def apply(self, event: RingEvent, intent: Intent) -> ApplyResult:
         """Log one accepted event (arrival order) and re-derive tracks."""
+        with self._lock:
+            return self._apply_locked(event, intent)
+
+    def _apply_locked(self, event: RingEvent, intent: Intent) -> ApplyResult:
         existing = self._db.execute(
             "SELECT 1 FROM events WHERE event_id = ?", (event.event_id,)
         ).fetchone()
@@ -242,7 +277,7 @@ class StateStore:
             return ApplyResult(
                 Transition.DUPLICATE,
                 f"event {event.event_id} already applied",
-                self.open_track_count(event.device_id),
+                sum(1 for t in self._tracks_locked(event.device_id) if t.is_open),
             )
 
         self._db.execute(
@@ -258,15 +293,17 @@ class StateStore:
                 event.received_at.isoformat(),
             ),
         )
-        before = {t.deposited_at: t for t in self.tracks(event.device_id)}
+        before = {t.deposited_at: t for t in self._tracks_locked(event.device_id)}
         logged = self._logged_events(event.device_id)
         after = _rebuild(event.device_id, logged)
         self._db.execute("DELETE FROM tracks WHERE device_id = ?", (event.device_id,))
-        self._db.executemany(
-            "INSERT INTO tracks (device_id, deposited_at, picked_up_at, deposits,"
-            " deposit_event_ids, pickup_event_id, out_of_order)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [
+        # one INSERT per statement (not executemany) so the same code runs
+        # on every DBAPI-shaped backend
+        for t in after:
+            self._db.execute(
+                "INSERT INTO tracks (device_id, deposited_at, picked_up_at, deposits,"
+                " deposit_event_ids, pickup_event_id, out_of_order)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     t.device_id,
                     t.deposited_at.isoformat(),
@@ -275,10 +312,8 @@ class StateStore:
                     json.dumps(list(t.deposit_event_ids)),
                     t.pickup_event_id,
                     int(t.out_of_order),
-                )
-                for t in after
-            ],
-        )
+                ),
+            )
         self._db.commit()
 
         transition, note = self._diff(event, intent, before, after)

@@ -40,19 +40,27 @@ from .routing import Router
 from .schema import SchemaError
 from .settings import Settings
 from .state import StateStore
+from .turso import TursoTokenStore, connect_turso
 from .verify import SignatureError
 from .wire import UnsupportedEvent
 
 
-def build_pipeline(settings: Settings, db_path: str | None = None) -> Pipeline:
+def build_pipeline(
+    settings: Settings,
+    db_path: str | None = None,
+    *,
+    state_store: StateStore | None = None,
+) -> Pipeline:
     """LLM classifier when fully configured, rule stub otherwise.
 
     Same composition point as every CLI (:func:`llm.build_classifier`):
     a configured endpoint wins, and endpoint trouble degrades to rules
-    per event instead of failing the delivery.
+    per event instead of failing the delivery. ``state_store`` injects a
+    pre-built store (the Turso/libsql deploy path); default is the
+    sqlite3 file store at ``db_path``.
     """
     classifier = build_classifier(settings)
-    store = StateStore(db_path or settings.db_path)
+    store = state_store if state_store is not None else StateStore(db_path or settings.db_path)
     router = Router.from_settings(settings)
     return Pipeline(
         secret=settings.webhook_secret,
@@ -69,7 +77,7 @@ def create_app(
     live_wire: bool = False,
     recorder: WebhookRecorder | None = None,
     token_exchanger: TokenExchanger | None = None,
-    token_store: TokenStore | None = None,
+    token_store: TokenStore | TursoTokenStore | None = None,
 ) -> FastAPI:
     """``live_wire=True`` speaks Ring's documented webhook v1.1 contract
     (JSON:API envelope + ``X-Signature``) — the mode to point Ring's
@@ -266,9 +274,27 @@ def build_default_app() -> FastAPI:
         if settings.client_id and settings.client_secret
         else None
     )
-    store = TokenStore(Path(settings.token_store_path)) if settings.token_store_path else None
+    # Deployed storage: Turso (libsql) when BOTH coordinates exist — Render's
+    # disk is ephemeral, so the state DB and the minted bundle must live off
+    # the instance. Half-configured fails closed; unset keeps local files.
+    turso = None
+    if settings.turso_url or settings.turso_token:
+        if not (settings.turso_url and settings.turso_token):
+            raise RuntimeError(
+                "RING_TURSO_URL and RING_TURSO_TOKEN must be set together; "
+                "unset both to use the local file stores"
+            )
+        turso = connect_turso(settings.turso_url, settings.turso_token)
+    state_store = StateStore(connection=turso) if turso is not None else None
+    store = (
+        TursoTokenStore(turso)
+        if turso is not None
+        else TokenStore(Path(settings.token_store_path))
+        if settings.token_store_path
+        else None
+    )
     return create_app(
-        build_pipeline(settings),
+        build_pipeline(settings, state_store=state_store),
         live_wire=True,
         recorder=recorder,
         token_exchanger=exchanger,
