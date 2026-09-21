@@ -1,0 +1,29 @@
+#!/bin/sh
+# Pre-push gate for ring-delivery-assistant: runs the push-time guards
+# and refuses the push when any of them fails:
+#   1. sensitive-content tokens anywhere in repository history —
+#      commit messages included, already-pushed commits included
+#      (local list; disabled when the list is absent; see
+#      scripts/guard-history.sh)
+# Wired via: git config core.hooksPath scripts/hooks
+# Rule text and rationale: scripts/hooks/README.md.
+#
+# The hook scans the FULL history (--all), not just the range being
+# pushed: at this repository's size the dump is small and the strict
+# invariant — no configured token anywhere in any reachable revision —
+# is cheaper to enforce wholesale than to track per-push ranges.
+#
+# Honest limits: `git push --no-verify` bypasses this hook, and the
+# scan sees only refs reachable in this clone. It is a tripwire, not
+# containment — see the guard header for the full boundary note.
+#
+# POSIX sh: no bashisms — runs under dash/busybox as well as bash.
+
+set -u
+ROOT="$(git rev-parse --show-toplevel)" || {
+  echo "pre-push: cannot determine repo root" >&2
+  exit 1
+}
+rc=0
+sh "$ROOT/scripts/guard-history.sh" || rc=1
+exit "$rc"

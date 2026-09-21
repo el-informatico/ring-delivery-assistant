@@ -1,9 +1,9 @@
-# Git hooks — triple validation at commit time
+# Git hooks — triple validation at commit time, one at push time
 
-This repository enforces three mechanical guards on every `git commit`.
-They are tripwires, not containment: `git commit --no-verify` bypasses
-them, so the matching behavior rule (below) matters as much as the
-hooks themselves.
+This repository enforces three mechanical guards on every `git commit`,
+plus one on every `git push`. They are tripwires, not containment:
+`--no-verify` bypasses them, so the matching behavior rule (below)
+matters as much as the hooks themselves.
 
 ## The three validations
 
@@ -33,20 +33,35 @@ the staged diff. That file lives inside `.git/`, so it is per-clone and
 strings and must not appear in the repository. The same list is also
 checked against the commit *message* by `hooks/commit-msg`.
 
+## Push-time validation
+
+4. **No sensitive tokens anywhere in repository history**
+   (`guard-history.sh`, run by `hooks/pre-push`): the full
+   `git log --all -p` dump — every commit message and every revision
+   diff reachable from any ref — is matched against the same local
+   token list. This closes the two blind spots of validations 2–3:
+   history that predates the tree guard, and commit messages (no
+   commit-time diff scan covers them). A hit blocks the push even if
+   a later commit deleted the token — the old revision still carries
+   it, so cleaning up means a history rewrite, not a new commit.
+
 ## Files
 
 | File | Role |
 |---|---|
 | `hooks/commit-msg` | validation 1 + sensitive tokens in the message |
-| `hooks/pre-commit` | runs the guard below |
+| `hooks/pre-commit` | runs the tree guard below |
 | `../guard-sensitive-content.sh` | validations 2 + 3 over staged added lines |
+| `hooks/pre-push` | runs the history guard below |
+| `../guard-history.sh` | validation 4 over the full history dump |
 
 ## Install (per clone)
 
 ```sh
 git config core.hooksPath scripts/hooks
 chmod +x scripts/hooks/commit-msg scripts/hooks/pre-commit \
-         scripts/guard-sensitive-content.sh
+         scripts/hooks/pre-push scripts/guard-sensitive-content.sh \
+         scripts/guard-history.sh
 ```
 
 Then create the local token list (adjust to your machine — every line
@@ -85,6 +100,10 @@ hooks' own source.
   token list that exists but is not a readable regular file): the
   commit is REFUSED — fail-closed.
 
+The push-time guard (validation 4) uses the same codes with the same
+semantics — `1` = token in history, `2` = internal failure — and the
+push is refused either way.
+
 ## Behavior rules (the hooks only tripwire these)
 
 - Never use `git commit --no-verify` in this repository.
@@ -97,9 +116,13 @@ hooks' own source.
 
 ## Honest limits
 
-`--no-verify` bypasses everything. Binary staged content is not
-scanned. Only ADDED lines are checked — a file that already carries a
+`--no-verify` bypasses everything (`git commit --no-verify`, and for
+the push-time guard `git push --no-verify`). Binary staged content is
+not scanned. Only ADDED lines are checked — a file that already carries a
 token under its tracked form is not re-flagged until a staged change
-adds a new token-bearing line. The guard never prints matched content,
-only file names and counts. The staged-file list is newline-delimited,
+adds a new token-bearing line. The history guard scans the whole dump
+as text, so a token split across a binary/encoded boundary escapes it,
+and it attributes matches to commits (sha + count), never printing the
+matched content; file/line attribution needs the offline attributed
+scanner. The staged-file list is newline-delimited,
 so a staged path containing an embedded newline is not scanned.
