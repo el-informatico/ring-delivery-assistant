@@ -2,7 +2,7 @@
 
 Replace the localhost.run tunnel with a permanent `https://<name>.onrender.com`
 URL: no process to keep alive on the LAN, no URL that dies on reconnect, $0
-total. 
+total.
 
 Architecture after this runbook:
 
@@ -11,7 +11,7 @@ Ring portal ──POST──> https://<name>.onrender.com/webhooks/ring   (Rende
                           │  uvicorn ring_assistant.server:app
                           ├── state DB + token bundle ──> Turso (libsql over
                           │                                  HTTPS, free tier)
-                          └── notify verdicts ──> Telegram 
+                          └── notify verdicts ──> Telegram
 UptimeRobot ──GET / every 5 min──> keeps the free instance from
                                     spinning down (~15 min idle otherwise)
 ```
@@ -22,20 +22,16 @@ never chatted.
 
 ---
 
-## Step 0 — GitHub repo 
+## Step 0 — the GitHub repo
 
-Render deploys from a GitHub repo, so the repo needs a GitHub home
-first. From `the repo root`:
+Render deploys from a GitHub repo. This project's canonical home is
+`github.com/el-informatico/ring-delivery-assistant`; to reproduce the
+deploy, fork it (or clone and push to your own GitHub account):
 
 ```bash
-gh repo create ring-delivery-assistant --private --source . --push
-#   (or, without gh:)
-git remote add origin git@github.com:el-informatico/ring-delivery-assistant.git
+git remote add origin git@github.com:<you>/ring-delivery-assistant.git
 git push -u origin main
 ```
-
-Private matters: the repo is not for public eyes before the hackathon
-scrub. Verify in the browser: the repo page shows a **Private** badge.
 
 ## Step 1 — Turso account + database (~5 min)
 
@@ -87,8 +83,8 @@ orders of magnitude above webhook traffic.
    `render.com` + `github.com`, or use another Chromium browser, and
    the handshake completes on the first try.
 2. Dashboard → **New +** → **Web Service**.
-3. Connect the `ring-delivery-assistant` (private) repo — authorize Render's
-   app if asked (private repos need the extra consent click).
+3. Connect the `ring-delivery-assistant` repo — authorize Render's GitHub
+   app if asked.
 4. Fill the form:
    | Field | Value |
    |---|---|
@@ -109,7 +105,7 @@ orders of magnitude above webhook traffic.
    | `RING_CLIENT_SECRET` | local `.env` (Ring portal credential) |
    | `RING_TURSO_URL` | Step 1 `turso db show --url` |
    | `RING_TURSO_TOKEN` | Step 1 `turso db tokens create` |
-   | `TELEGRAM_BOT_TOKEN` | local `.env` (optional but recommended — enables notify verdicts via the Telegram Bot API) |
+   | `TELEGRAM_BOT_TOKEN` | local `.env` (optional — enables notify verdicts via the Telegram Bot API) |
    | `TELEGRAM_CHAT_ID` | local `.env` (same) |
    | `PYTHON_VERSION` | `3.13` (literal — matches the version the suite runs on) |
 6. **Deploy Web Service**. First build ~3–5 min (pip + Rust-built libsql
