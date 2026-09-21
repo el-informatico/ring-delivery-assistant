@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 import pytest
@@ -10,6 +11,31 @@ import pytest
 from ring_assistant.verify import sign_payload
 
 SECRET = "synthetic-test-secret"
+
+# Env-only keys that flip a sink/leg to LIVE. The suite's contract is
+# offline/zero-sockets; a developer's populated .env must not leak in
+# (the CLI tests call main(), whose load_env_file() would otherwise
+# leave real Telegram credentials in os.environ for every later test).
+LIVE_LEG_KEYS = (
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "RING_LLM_ENDPOINT",
+    "RING_LLM_MODEL",
+    "RING_LLM_API_KEY",
+    "RING_NOTIFY_WEBHOOK_URL",
+)
+
+
+@pytest.fixture(autouse=True)
+def hermetic_live_legs(monkeypatch):
+    """Pin live-credential env vars to empty so no test can open a socket.
+
+    Empty (not deleted): ``load_env_file`` skips keys already present in
+    ``os.environ``, so the CLI tests' in-process ``main()`` call cannot
+    re-import real credentials from the developer's ``.env`` either.
+    """
+    for key in LIVE_LEG_KEYS:
+        monkeypatch.setenv(key, "")
 
 
 @pytest.fixture
