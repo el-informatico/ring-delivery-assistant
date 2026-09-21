@@ -1,13 +1,16 @@
 # Validation — real outputs, honest caveats
 
 Everything here was produced on 2026-09-16 by the commands in
-`USAGE.md`, in this repository, offline (no network).
+`USAGE.md`, in this repository, offline (no network). The test-run
+capture below was re-run at the 2026-09-21 pre-publication sync —
+the suite had grown and the docs lagged (323 → 354, synced the same
+day).
 
 ## Test run
 
 ```
 $ uv run pytest
-323 passed, 2 warnings in 6.03s
+354 passed, 2 warnings in 3.95s
 ```
 
 The two warnings come from `fastapi`'s own testclient shim

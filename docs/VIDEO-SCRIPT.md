@@ -33,7 +33,7 @@ amazonappdev2026.devpost.com/rules). The narration below already says
 > This project is the layer after the ding.
 
 **On screen:** terminal, idle prompt → type `uv run pytest` (clip C1),
-let the tail land: `323 passed in 3.70s`. Cut on the number.
+let the tail land: `354 passed in 3.95s`. Cut on the number.
 
 ### 2. Positioning (0:13–0:30)
 
@@ -126,7 +126,7 @@ fallback if you quote exact figures on screen instead.
 > Events API, the real model, real Telegram — is an environment
 > variable, mapped in the architecture diagram.
 
-**On screen:** C1 tail again (`323 passed`), then the ARCHITECTURE.md
+**On screen:** C1 tail again (`354 passed`), then the ARCHITECTURE.md
 plug-in list (the five `PLUG` nodes) — zoom each env var name as it is
 spoken.
 
@@ -151,7 +151,7 @@ or Win+G) — the terminal is Windows Terminal hosting the WSL shell.
 
 | Clip | What | Command / file | Expected on screen |
 |---|---|---|---|
-| C1 | test suite | `uv run pytest` | `323 passed, 2 warnings in ~4s` (tail only needs recording) |
+| C1 | test suite | `uv run pytest` | `354 passed, 2 warnings in ~4s` (tail only needs recording) |
 | C2 | the day, live-typed | `uv run timeline` | 7 notification lines, `11 deliveries, 7 notifications`, artifact paths |
 | C3 | the artifact | open `.timeline/timeline.md` | full table; rows 08:03:21, s3-007, s3-011; notifications + caveats |
 | C4 | star metric | `uv run star-metric` | mode line + `N = 11 … median … ms` summary |
@@ -165,7 +165,7 @@ bytes, honest "this run" numbers):
 
 ```bash
 git status                          # clean tree, nothing distracting
-uv run pytest                       # confirm 323 first
+uv run pytest                       # confirm 354 first
 uv run timeline && uv run star-metric
 ```
 

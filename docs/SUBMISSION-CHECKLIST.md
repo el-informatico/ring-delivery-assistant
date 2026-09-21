@@ -63,12 +63,11 @@ order:
 
 ## E. Links + publication gate [human — explicit approval required]
 
-- [ ] **Publication gate (sprint rule): the repo goes public only after
-      the owner explicitly approves.** Until then Devpost gets the video
-      and text; the repo link is added only if the gate passes.
-- [ ] If approved: make the GitHub repo public, push `main` (no push
-      has happened from this workspace — push is part of this item),
-      paste the URL into Devpost.
+- [x] **Publication gate (sprint rule): the repo goes public only after
+      the owner explicitly approves.** PASSED 2026-09-21 — owner
+      approved publication.
+- [x] Approved + executed 2026-09-21: repo made public, `main` pushed
+      and verified, URL ready to paste into Devpost.
 - [ ] Repo link targets: README (star metric table + honest framing) as
       landing, LICENSE (Apache-2.0) visible.
 
@@ -85,7 +84,7 @@ order:
 ## G. Pre-flight (run on submission morning) [repo]
 
 ```bash
-uv run pytest                     # expect: 323 passed
+uv run pytest                     # expect: 354 passed
 uv lock --check                   # expect: no output (lock in sync)
 git status                        # expect: clean
 ```

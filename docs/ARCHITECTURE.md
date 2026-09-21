@@ -7,7 +7,7 @@ and the **registration-day plug-in points** (every place live traffic
 plugs in — all of them environment, none of them code).
 
 Everything below is verifiable in the repo: module names are files under
-`src/ring_assistant/`, behavior is pinned by the 323-test offline suite,
+`src/ring_assistant/`, behavior is pinned by the 354-test offline suite,
 and every latency claim traces to `uv run star-metric` output.
 
 ## The flow

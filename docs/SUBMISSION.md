@@ -60,7 +60,7 @@ did, how it works, and why it matters."
   multimodal adapter, a cross-event state machine tracks deposit →
   pickup per device (late stragglers suppressed, redeliveries no-ops),
   and a rules engine decides who gets told what — Telegram,
-  severity-conditioned. 323 offline tests, zero sockets, Apache-2.0;
+  severity-conditioned. 354 offline tests, zero sockets, Apache-2.0;
   every network leg is a documented contract behind an env-only swap.
 
 **In-window note (pre-existing-work disclosure is trivially
@@ -104,7 +104,7 @@ The whole trip is measured: **ding → routed notification, median
 6.4 ms** over an 11-event day (N = 11, 7 routed notifications,
 classification stage alone 2.6 ms) — offline timings of the pipeline's
 own stages, with both network legs mocked (details under "How we built
-it"). 323 offline tests, zero sockets, keep all of it pinned.
+it"). 354 offline tests, zero sockets, keep all of it pinned.
 
 ## How we built it
 
@@ -173,7 +173,7 @@ such wherever a number appears.
 
 ## Accomplishments we're proud of
 
-- **323 tests, 0 failures, ~4 s, zero sockets** — the entire system,
+- **354 tests, 0 failures, ~4 s, zero sockets** — the entire system,
   including the HTTP contract and both network legs' call paths, is
   tested offline through injected transports.
 - **A measured star metric**, not an estimate: ding → routed
@@ -239,7 +239,7 @@ contracts), WSL2.
    N = 11, median 6.373 ms).
 3. The demo is the replay/simulator lane — say "simulator" in the video
    and text, and cite the rules sanction when relevant.
-4. No invented team members, awards, users, or metrics; "323 tests"
+4. No invented team members, awards, users, or metrics; "354 tests"
    moves only when `uv run pytest` says so.
 5. The AWS Builder mini is entered only with an honest scope statement,
    or not at all.

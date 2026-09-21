@@ -11,6 +11,16 @@ as an offline-first OSS library skeleton. Apache-2.0.
 > door at night → escalate; motion-only noise → suppressed unless it
 > repeats). Detection is an input (`sub_type`), not the product.
 
+## Live demo
+
+**<https://ring-delivery-assistant.onrender.com>** — this server,
+deployed on Render's free tier (it spins down after ~15 min idle, so
+the first request may take a few seconds to wake). The webhook portal
+(Ring's v1.1 wire contract, HMAC-verified), the OAuth token-exchange
+endpoint, and the account-link gate are documented in
+`docs/PORTAL-ENDPOINTS.md`; the $0 deploy runbook (Render + Turso) is
+`docs/DEPLOY-RENDER.md`.
+
 ## What is real vs synthetic
 
 This repository is the **offline skeleton**: no Ring hardware, no real
@@ -169,7 +179,7 @@ for a parcel that already left.
 
 ```bash
 uv sync                   # core: zero runtime dependencies
-uv run pytest             # 323 tests, offline
+uv run pytest             # 354 tests, offline
 uv run demo               # end-to-end timeline (deterministic)
 uv run timeline           # scripted day -> .timeline/timeline.md
 uv run star-metric        # measured ding -> notification latencies

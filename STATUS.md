@@ -1,6 +1,7 @@
 # STATUS — ring-delivery-assistant
 
-Build log. Last entry: 2026-09-16 (S4 — submission readiness; 323 tests).
+Build log. Last entry: 2026-09-16 (S4 — submission readiness; suite
+count synced 2026-09-21: 354 tests).
 
 ## S4 — submission readiness (everything but the human's two gates)
 
@@ -8,7 +9,8 @@ Goal: submission day (deadline 23-Oct-2026 12:00 PDT = 14:00 Lima) is
 pure execution. Everything the repo can produce for Devpost now exists;
 what remains is the human's portal registration (S1 Lane A, still
 open), the video recording, and the publication-approval gate. Suite
-unchanged and green: **323 tests, 0 failures (~4 s)**, `uv lock
+green: **354 tests, 0 failures (~4 s)** (count re-verified 2026-09-21),
+`uv lock
 --check` clean, `uv sync --frozen` installs from the lock.
 
 ### Deliverables landed
@@ -18,7 +20,7 @@ unchanged and green: **323 tests, 0 failures (~4 s)**, `uv lock
       no live-traffic claims without credentials on screen, latency
       quotes keep their offline/mock qualifiers, the demo is named a
       simulator (rules-sanctioned, URL cited), no invented
-      people/metrics. Numbers used: 323 tests; N = 11, median 6.373 ms
+      people/metrics. Numbers used: 354 tests; N = 11, median 6.373 ms
       ding → routed notification, classify median 2.627 ms (README's
       published run).
 - [x] **`docs/VIDEO-SCRIPT.md`** — ~2:50 script (under the 3-min cap),
@@ -64,9 +66,8 @@ unchanged and green: **323 tests, 0 failures (~4 s)**, `uv lock
    checklist only if registration completed).
 2. Fill the Devpost form from `docs/SUBMISSION.md` +
    `SUBMISSION-CHECKLIST.md` §A–F; submit the day before the deadline.
-3. Publication gate: explicit owner approval before the repo (and the
-   video's repo URL) goes public; pushing `main` is part of that item —
-   no push has happened.
+3. Publication gate: passed 2026-09-21 — owner approved publication;
+   `main` pushed (verified three ways) and the repo made public.
 
 ## S3 — value layer live (mock legs until credentials, swap is config)
 
@@ -129,7 +130,8 @@ stand-ins; each swap is documented and is configuration, not code.
 - [x] New knobs (`settings.py`, `.env.example`):
       `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_TIMEOUT` —
       all optional, empty = offline mode, secrets .env-only.
-- **Suite: 323 tests, 0 failures (~6 s)** — 281 prior + 42 new
+- **Suite: 354 tests, 0 failures** — 281 prior + 42 new at S3 (323
+  then), +31 since; count synced 2026-09-21
   (`test_telegram.py` +13, `test_star.py` +8, `test_classify.py` +8,
   `test_llm.py` +11, `test_timeline.py` +2), all offline, zero
   sockets.
@@ -345,9 +347,8 @@ never blocks the buildable part.
       `docs/SUBMISSION-CHECKLIST.md`): record the video per
       `docs/VIDEO-SCRIPT.md`; fill the Devpost form from
       `docs/SUBMISSION.md`; submit before 23-Oct 14:00 Lima
-- [ ] S4 publication gate: explicit owner approval before the repo or
-      the video's repo URL goes public (pushing `main` belongs to this
-      item — no push yet)
+- [x] S4 publication gate: PASSED 2026-09-21 — owner approved;
+      `main` pushed and the repo made public
 - [x] S1 gate: PASSED 2026-09-17 — owner completed the portal
       registration; credentials live in `.env` (verified end-to-end:
       signed webhook accepted through the public tunnel URL,
